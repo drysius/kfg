@@ -10,7 +10,7 @@ if (existsSync('dist')) await rm('dist', { recursive: true })
 
 const sharedConfig: Options = {
   platform: 'node',
-  entry: ['src/ConfigJS.ts'],
+  entry: ['src/index.ts'],
   bundle: true,
   minify: true,
   minifyIdentifiers: true,
@@ -42,9 +42,9 @@ await build({
 await writeFile('cjs/package.json', JSON.stringify({ type: 'commonjs' }, null, 2))
 await writeFile('esm/package.json', JSON.stringify({ type: 'module' }, null, 2))
 
-const dtsPath = join(process.cwd(), 'ConfigJS.d.ts')
+const dtsPath = join(process.cwd(), 'index.d.ts')
 const dtsCode = generateDtsBundle([{
-  filePath: join(process.cwd(), 'src/ConfigJS.ts'),
+  filePath: join(process.cwd(), 'src/index.ts'),
   output: {
     sortNodes: true,
     exportReferencedTypes: true,

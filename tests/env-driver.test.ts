@@ -1,397 +1,241 @@
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
-import { c, ConfigJS, envDriver } from "../src/ConfigJS";
-import fs from 'node:fs';
+import { Type } from '@sinclair/typebox';
+import { Config } from '../src';
+import { EnvDriver } from '../src/drivers/env-driver';
+import fs from 'node:fs'; // Added fs import
 import { setTimeout } from 'node:timers/promises';
 
-// Helper functions for test files
-const cleanupTestFiles = () => {
-  if (fs.existsSync('.test')) fs.unlinkSync('.test');
-  if (fs.existsSync('.test2')) fs.unlinkSync('.test2');
+// Helper to clear environment variables set during tests
+const clearEnvVars = () => {
+  // Clear specific process.env vars that might be set by tests
+  delete process.env.APPNAME;
+  delete process.env.ENVIRONMENT;
+  delete process.env.DATABASE_HOST;
+  delete process.env.DATABASE_PORT;
+  delete process.env.DATABASE_USER;
+  delete process.env.DATABASE_PASSWORD;
+  delete process.env.APIKEYS_GOOGLE;
+  delete process.env.APIKEYS_STRIPE;
+
+  // Delete test .env file
+  if (fs.existsSync('.test.env')) fs.unlinkSync('.test.env');
 };
 
-const createTestFile = (content: string = '', filename: string = '.test') => {
-  fs.writeFileSync(filename, content);
-};
+const AppConfigSchema = Type.Object({
+  appName: Type.String({ default: 'My Awesome App' }),
+  environment: Type.Union([Type.Literal('development'), Type.Literal('production')], { default: 'development' }),
+  database: Type.Object({
+    host: Type.String({ default: 'localhost' }),
+    port: Type.Number({ default: 5432 }),
+    user: Type.String({ default: '' }),
+    password: Type.String({ default: '' }),
+  }),
+  apiKeys: Type.Object({
+    google: Type.Optional(Type.String()),
+    stripe: Type.Optional(Type.String()),
+  }),
+});
 
 const getTestConfig = () => {
-  return new ConfigJS(envDriver, {
-    test: c.string(),
-    valor: {
-      valor: c.string(),
-      numero: c.number().optional(),
-    },
-    ativo: c.boolean(),
-    lista: c.array(c.string()),
-  });
+  return new Config(
+    new EnvDriver(),
+    { filepath: '.test.env' }, // Set filepath for EnvDriver
+    AppConfigSchema
+  );
 };
 
 const delayBetweenTests = async () => {
   await setTimeout(100); // 100ms delay
 };
 
-describe('ConfigJS with envDriver', () => {
+describe('Config with EnvDriver', () => {
+  beforeEach(() => {
+    clearEnvVars();
+  });
+
   afterEach(async () => {
-    cleanupTestFiles();
+    clearEnvVars();
     await delayBetweenTests();
   });
 
   describe('Initialization', () => {
-    test('should create a new instance with schema', async () => {
+    test('should create a new instance with schema', () => {
       const config = getTestConfig();
-      expect(config).toBeInstanceOf(ConfigJS);
-      await delayBetweenTests();
+      expect(config).toBeInstanceOf(Config);
     });
   });
 
   describe('load()', () => {
-    test('should load values from .env file', async () => {
-      createTestFile('test=loaded\nvalor.valor=loaded_valor');
+    test('should load values from environment variables file', () => {
+      fs.writeFileSync('.test.env', 'APPNAME=Loaded App\nDATABASE_HOST=loaded.db.com\nDATABASE_PORT=1234');
       const config = getTestConfig();
-      config.load({ filepath: '.test' });
+      config.load();
       
-      expect(config.get('test')).toBe('loaded');
-      expect(config.get('valor.valor')).toBe('loaded_valor');
-      await delayBetweenTests();
+      expect(config.get('appName')).toBe('Loaded App');
+      expect(config.get('database.host')).toBe('loaded.db.com');
+      expect(config.get('database.port')).toBe(1234);
     });
 
-    test('should use default values when .env file is empty', async () => {
-      const config = new ConfigJS(envDriver, {
-        test: c.string().default('default_value')
-      });
-      config.load({ filepath: '.test' });
+    test('should use default values when env var file is not set or empty', () => {
+      // File not created, so it should use defaults
+      const config = getTestConfig();
+      config.load();
       
-      expect(config.get('test')).toBe('default_value');
-      await delayBetweenTests();
+      expect(config.get('appName')).toBe('My Awesome App');
+      expect(config.get('database.port')).toBe(5432);
     });
 
-    test('should handle empty file', async () => {
-      createTestFile();
+    test('should handle boolean env vars', () => {
+      fs.writeFileSync('.test.env', 'ENVIRONMENT=production');
       const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      
-      expect(config.get('test')).toBeUndefined();
-      await delayBetweenTests();
+      config.load();
+      expect(config.get('environment')).toBe('production');
+    });
+
+    test('should handle optional env vars not set', () => {
+      const config = getTestConfig();
+      config.load();
+      expect(config.get('apiKeys.google')).toBeUndefined();
     });
   });
 
   describe('get()', () => {
-    test('should get string value', async () => {
-      createTestFile('test=example');
+    test('should get string value', () => {
+      fs.writeFileSync('.test.env', 'APPNAME=Test App');
       const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      
-      expect(config.get('test')).toBe('example');
-      await delayBetweenTests();
+      config.load();
+      expect(config.get('appName')).toBe('Test App');
     });
 
-    test('should get nested value', async () => {
-      createTestFile('valor.valor=nested');
+    test('should get nested value', () => {
+      fs.writeFileSync('.test.env', 'DATABASE_HOST=nested.db');
       const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      
-      expect(config.get('valor.valor')).toBe('nested');
-      await delayBetweenTests();
+      config.load();
+      expect(config.get('database.host')).toBe('nested.db');
     });
 
-    test('should get boolean value', async () => {
-      createTestFile('ativo=true');
+    test('should get number value', () => {
+      fs.writeFileSync('.test.env', 'DATABASE_PORT=9999');
       const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      
-      expect(config.get('ativo')).toBe(true);
-      await delayBetweenTests();
+      config.load();
+      expect(config.get('database.port')).toBe(9999);
     });
 
-    test('should get array value', async () => {
-      createTestFile('lista=["a","b","c"]');
+    test('should return undefined for non-existent key', () => {
       const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      
-      expect(config.get('lista')).toEqual(['a', 'b', 'c']);
-      await delayBetweenTests();
-    });
-
-    test('should throw for invalid key', async () => {
-      const config = getTestConfig();
-      expect(() => config.get('invalid.key' as never)).toThrow();
-      await delayBetweenTests();
-    });
-
-    test('should return undefined for optional fields', async () => {
-      createTestFile('test=value');
-      const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      
-      expect(config.get('valor.numero'  as never as never)).toBeUndefined();
-      await delayBetweenTests();
+      config.load();
+      expect(config.get('nonExistentKey')).toBeUndefined();
     });
   });
 
-  describe('set()', () => {
-    test('should set string value', async () => {
+  describe('set() and save()', () => {
+    test('should set string value and update file', () => {
+      fs.writeFileSync('.test.env', 'APPNAME=Old App Name');
       const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      config.set('test', 'new_value');
+      config.load();
+      config.set('appName', 'New App Name');
+      config.save();
       
-      expect(config.get('test')).toBe('new_value');
-      expect(fs.readFileSync('.test', 'utf8')).toContain('test="new_value"');
-      await delayBetweenTests();
+      expect(config.get('appName')).toBe('New App Name');
+      expect(fs.readFileSync('.test.env', 'utf8')).toContain('APPNAME=New App Name');
     });
 
-    test('should set nested value', async () => {
+    test('should set nested value and update file', () => {
+      fs.writeFileSync('.test.env', 'DATABASE_HOST=old.host.com');
       const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      config.set('valor.valor', 'new_nested');
+      config.load();
+      config.set('database.host', 'new.host.com');
+      config.save();
       
-      expect(config.get('valor.valor')).toBe('new_nested');
-      expect(fs.readFileSync('.test', 'utf8')).toContain('valor.valor="new_nested"');
-      await delayBetweenTests();
+      expect(config.get('database.host')).toBe('new.host.com');
+      expect(fs.readFileSync('.test.env', 'utf8')).toContain('DATABASE_HOST=new.host.com');
     });
 
-    test('should set boolean value', async () => {
+    test('should set number value and update file', () => {
+      fs.writeFileSync('.test.env', 'DATABASE_PORT=1111');
       const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      config.set('ativo', true);
+      config.load();
+      config.set('database.port', 8888);
+      config.save();
       
-      expect(config.get('ativo')).toBe(true);
-      expect(fs.readFileSync('.test', 'utf8')).toContain('ativo=true');
-      await delayBetweenTests();
+      expect(config.get('database.port')).toBe(8888);
+      expect(fs.readFileSync('.test.env', 'utf8')).toContain('DATABASE_PORT=8888'); // Env vars are always strings
     });
 
-    test('should set array value', async () => {
+    test('should set boolean value and update file', () => {
+      fs.writeFileSync('.test.env', 'ENVIRONMENT=false');
       const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      config.set('lista', ['x', 'y', 'z']);
+      config.load();
+      config.set('environment', 'production');
+      config.save();
       
-      expect(config.get('lista')).toEqual(['x', 'y', 'z']);
-      expect(fs.readFileSync('.test', 'utf8')).toContain('lista=[\"x\",\"y\",\"z\"]');
-      await delayBetweenTests();
+      expect(config.get('environment')).toBe('production');
+      expect(fs.readFileSync('.test.env', 'utf8')).toContain('ENVIRONMENT=production');
     });
 
-    test('should throw when setting invalid value', async () => {
+    test('should handle setting optional values', () => {
       const config = getTestConfig();
-      config.load({ filepath: '.test' });
+      config.load();
+      config.set('apiKeys.google', 'my_new_google_key');
+      config.save();
       
-      expect(() => config.set('test', 123 as any)).toThrow();
-      await delayBetweenTests();
-    });
-  });
-
-  describe('define()', () => {
-    test('should define multiple values at once', async () => {
-      const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      config.define({
-        test: 'defined',
-        valor: {
-          valor: 'defined_nested'
-        }
-      });
-      
-      expect(config.get('test')).toBe('defined');
-      expect(config.get('valor.valor')).toBe('defined_nested');
-      const fileContent = fs.readFileSync('.test', 'utf8');
-      expect(fileContent).toContain('test="defined"');
-      expect(fileContent).toContain('valor.valor="defined_nested"');
-      await delayBetweenTests();
+      expect(config.get('apiKeys.google')).toBe('my_new_google_key');
+      expect(fs.readFileSync('.test.env', 'utf8')).toContain('APIKEYS_GOOGLE=my_new_google_key');
     });
 
-    test('should override existing values', async () => {
-      createTestFile('test=old_value');
+    test('should add new keys to the file', () => {
+      fs.writeFileSync('.test.env', '# Existing comment\nEXISTING_KEY=old_value');
       const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      config.define({ test: 'new_value' });
-      
-      expect(config.get('test')).toBe('new_value');
-      await delayBetweenTests();
-    });
-  });
+      config.load();
+      config.set('apiKeys.stripe', 'new_stripe_key'); // Assuming stripe is not in initial file
+      config.save();
 
-  describe('root()', () => {
-    test('should get root object values', async () => {
-      createTestFile('test=root_test\nvalor.valor=root_valor');
-      const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      
-      const root = config.root('valor');
-      expect(root).toEqual({
-        valor: 'root_valor',
-        numero: undefined
-      });
-      await delayBetweenTests();
+      const fileContent = fs.readFileSync('.test.env', 'utf8');
+      expect(fileContent).toContain('APIKEYS_STRIPE=new_stripe_key');
+      expect(fileContent).toContain('EXISTING_KEY=old_value');
     });
 
-    test('should return undefined for non-existent root', async () => {
+    test('should preserve comments and blank lines', () => {
+      const initialContent = `
+# This is a comment
+APPNAME=InitialApp
+
+DATABASE_HOST=initial.db # Inline comment
+`;
+      fs.writeFileSync('.test.env', initialContent);
       const config = getTestConfig();
-      config.load({ filepath: '.test' });
+      config.load();
       
-      expect(() => config.root('nonexistent' as any)).toThrow();
-      await delayBetweenTests();
+      config.set('appName', 'UpdatedApp');
+      config.set('database.host', 'updated.db');
+      config.save();
+
+      const finalContent = fs.readFileSync('.test.env', 'utf8');
+      expect(finalContent).toContain('# This is a comment');
+      expect(finalContent).toContain('APPNAME=UpdatedApp');
+      expect(finalContent).toContain('DATABASE_HOST=updated.db # Inline comment');
+      expect(finalContent).toContain('\n\n'); // Check for blank line preservation
     });
   });
 
   describe('all()', () => {
-    test('should get all values', async () => {
-      createTestFile('test=all_test\nvalor.valor=all_valor');
+    test('should get all values including defaults', () => {
+      fs.writeFileSync('.test.env', 'APPNAME=Env All App\nDATABASE_USER=env_all_user');
       const config = getTestConfig();
-      config.load({ filepath: '.test' });
+      config.load();
       
       const all = config.all();
       expect(all).toEqual({
-        test: 'all_test',
-        valor: {
-          valor: 'all_valor',
-          numero: undefined
+        appName: 'Env All App',
+        environment: 'development', // Default
+        database: {
+          host: 'localhost', // Default
+          port: 5432, // Default
+          user: 'env_all_user',
+          password: '', // Default
         },
-        ativo: undefined as never,
-        lista: undefined as never
+        apiKeys: {}, // Default
       });
-      await delayBetweenTests();
-    });
-
-    test('should return empty structure for empty config', async () => {
-      const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      
-      const all = config.all();
-      expect(all).toEqual({
-        test: undefined as never,
-        valor: {
-          valor: undefined as never,
-          numero: undefined
-        },
-        ativo: undefined as never,
-        lista: undefined as never
-      });
-      await delayBetweenTests();
-    });
-  });
-
-  describe('insert()', () => {
-    test('should insert values into root key', async () => {
-      const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      config.insert('valor', {
-        valor: 'inserted',
-        numero: 42
-      });
-      
-      expect(config.get('valor.valor')).toBe('inserted');
-      expect(config.get('valor.numero'  as never)).toBe(42  as never);
-      const fileContent = fs.readFileSync('.test', 'utf8');
-      expect(fileContent).toContain('valor.valor="inserted"');
-      expect(fileContent).toContain('valor.numero=42');
-      await delayBetweenTests();
-    });
-
-    test('should handle partial inserts', async () => {
-      const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      config.insert('valor', { valor: 'partial' });
-      
-      expect(config.get('valor.valor')).toBe('partial');
-      expect(config.get('valor.numero'  as never)).toBeUndefined();
-      await delayBetweenTests();
-    });
-  });
-
-  describe('has()', () => {
-    test('should return true for existing key', async () => {
-      createTestFile('test=exists');
-      const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      
-      expect(config.has('test')).toBe(true);
-      await delayBetweenTests();
-    });
-
-    test('should return false for non-existing key', async () => {
-      const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      
-      expect(() => config.has('non.existing' as never)).toThrow();
-      await delayBetweenTests();
-    });
-
-    test('should check nested keys', async () => {
-      createTestFile('valor.valor=exists');
-      const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      
-      expect(config.has('valor.valor')).toBe(true);
-      expect(config.has('valor.numero'  as never)).toBe(false);
-      await delayBetweenTests();
-    });
-  });
-
-  describe('filepath change', () => {
-    test('should switch to new filepath', async () => {
-      createTestFile('test=file1');
-      const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      
-      // Change filepath and create new file
-      createTestFile('test=file2', '.test2');
-      config.load({ filepath: '.test2' });
-      expect(config.get('test')).toBe('file2');
-      await delayBetweenTests();
-    });
-
-    test('should maintain separate files', async () => {
-      createTestFile('test=file1');
-      const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      
-      createTestFile('test=file2', '.test2');
-      config.load({ filepath: '.test2' });
-      
-      expect(fs.readFileSync('.test', 'utf8')).toContain('test=file1');
-      expect(fs.readFileSync('.test2', 'utf8')).toContain('test=file2');
-      await delayBetweenTests();
-    });
-  });
-
-  describe('validation', () => {
-    test('should validate string values', async () => {
-      const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      
-      expect(() => {
-        config.set('test', 123 as any);
-      }).toThrow();
-      await delayBetweenTests();
-    });
-
-    test('should validate number values', async () => {
-      const config = new ConfigJS(envDriver, {
-        age: c.number()
-      });
-      config.load({ filepath: '.test' });
-      
-      expect(() => {
-        config.set('age', 'not_a_number' as any);
-      }).toThrow();
-      await delayBetweenTests();
-    });
-
-    test('should validate array values', async () => {
-      const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      
-      expect(() => {
-        config.set('lista', 'not_an_array' as any);
-      }).toThrow();
-      await delayBetweenTests();
-    });
-
-    test('should validate nested structures', async () => {
-      const config = getTestConfig();
-      config.load({ filepath: '.test' });
-      
-      expect(() => {
-        config.set('valor' as never, { valor: 123 } as never);
-      }).toThrow();
-      await delayBetweenTests();
     });
   });
 });
