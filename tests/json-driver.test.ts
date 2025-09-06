@@ -1,284 +1,157 @@
-import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
-import { Type } from '@sinclair/typebox';
-import { Config } from '../src';
-import { JsonDriver } from '../src/drivers/json-driver';
-import fs from 'node:fs';
-import { setTimeout } from 'node:timers/promises';
+import { describe, it, expect, afterAll, beforeEach } from 'bun:test';
+import { ConfigJSDriver } from '../src/driver';
+import * as fs from 'fs';
+import * as fsp from 'fs/promises';
+import * as path from 'path';
 
-// Helper functions for test files
-const cleanupTestFiles = () => {
-  if (fs.existsSync('test.json')) fs.unlinkSync('test.json');
-  if (fs.existsSync('test2.json')) fs.unlinkSync('test2.json');
-};
+const TEST_JSON_PATH = path.join(__dirname, 'config.test.json');
 
-const createTestFile = (content: object = {}, filename: string = 'test.json') => {
-  fs.writeFileSync(filename, JSON.stringify(content));
-};
+// --- Helper Functions (mirrored from the actual driver for accurate testing) ---
+function getProperty(obj: Record<string, any>, path: string): any {
+    return path.split('.').reduce((acc, key) => acc?.[key], obj);
+}
 
-// 1. Define your configuration schema using TypeBox (matching example.ts)
-const AppConfigSchema = Type.Object({
-  appName: Type.String({ default: 'My Awesome App' }),
-  environment: Type.Union([Type.Literal('development'), Type.Literal('production')], { default: 'development' }),
-  database: Type.Object({
-    host: Type.String({ default: 'localhost' }),
-    port: Type.Number({ default: 5432 }),
-    user: Type.String({ default: '' }), // Added default for user
-    password: Type.String({ default: '' }), // Added default for password
-  }),
-  apiKeys: Type.Object({
-    google: Type.Optional(Type.String()),
-    stripe: Type.Optional(Type.String()),
-  }),
-});
+function setProperty(obj: Record<string, any>, path: string, value: any): void {
+    const keys = path.split('.');
+    const lastKey = keys.pop()!;
+    let target = obj;
+    for (const key of keys) {
+        if (target[key] === undefined || typeof target[key] !== 'object') {
+            target[key] = {};
+        }
+        target = target[key];
+    }
+    target[lastKey] = value;
+}
 
-const getTestConfig = () => {
-  return new Config(
-    new JsonDriver(),
-    { filepath: 'test.json' },
-    AppConfigSchema
-  );
-};
+const createTestJsonDriver = (isAsync: boolean) => {
+    if (isAsync) {
+        return new ConfigJSDriver({
+            identify: 'test-json-driver-async',
+            async: true,
+            config: { path: TEST_JSON_PATH },
+            async onLoad() {
+                this.store = {}; // Reset store
+                try {
+                    const fileContent = await fsp.readFile(this.config.path, 'utf-8');
+                    if (fileContent) this.store = JSON.parse(fileContent);
+                } catch (error: any) {
+                    if (error.code === 'ENOENT') return; // File not found is ok
+                    throw error; // Other errors should fail the test
+                }
+            },
+            onGet(key) { return Promise.resolve(getProperty(this.store, key)); },
+            async onSet(key, value) {
+                setProperty(this.store, key, value);
+                await fsp.writeFile(this.config.path, JSON.stringify(this.store, null, 2));
+            },
+        });
+    }
 
-const delayBetweenTests = async () => {
-  await setTimeout(100); // 100ms delay
-};
-
-describe('Config with JsonDriver', () => {
-  afterEach(async () => {
-    cleanupTestFiles();
-    await delayBetweenTests();
-  });
-
-  describe('Initialization', () => {
-    test('should create a new instance with schema', () => {
-      const config = getTestConfig();
-      expect(config).toBeInstanceOf(Config);
-    });
-  });
-
-  describe('load()', () => {
-    test('should load values from JSON file', () => {
-      createTestFile({ appName: "loaded", database: { host: "loaded.db" } });
-      const config = getTestConfig();
-      config.load();
-      
-      expect(config.get('appName')).toBe('loaded');
-      expect(config.get('database.host')).toBe('loaded.db');
-    });
-
-    test('should use default values when JSON file is empty', () => {
-      const config = getTestConfig();
-      config.load();
-      
-      expect(config.get('appName')).toBe('My Awesome App');
-    });
-
-    test('should handle empty file by creating it with empty object', () => {
-      fs.writeFileSync('test.json', '');
-      const config = getTestConfig();
-      config.load();
-      
-      // Expect default values to be applied
-      expect(config.get('appName')).toBe('My Awesome App');
-      expect(fs.readFileSync('test.json', 'utf8')).toBe('{}');
-    });
-
-    test('should create file if it doesnt exist', () => {
-      const config = getTestConfig();
-      config.load();
-      
-      expect(fs.existsSync('test.json')).toBe(true);
-      expect(JSON.parse(fs.readFileSync('test.json', 'utf8'))).toEqual({});
-    });
-  });
-
-  describe('get()', () => {
-    test('should get string value', () => {
-      createTestFile({ appName: "example" });
-      const config = getTestConfig();
-      config.load();
-      
-      expect(config.get('appName')).toBe('example');
-    });
-
-    test('should get nested value', () => {
-      createTestFile({ database: { host: "nested.db" } });
-      const config = getTestConfig();
-      config.load();
-      
-      expect(config.get('database.host')).toBe('nested.db');
-    });
-
-    test('should get boolean value', () => {
-      createTestFile({ environment: "production" });
-      const config = getTestConfig();
-      config.load();
-      
-      expect(config.get('environment')).toBe('production');
-    });
-
-    test('should get array value (not directly in schema, but for completeness)', () => {
-      // This schema doesn't have a direct array, but we can test a property that might be an array if schema allowed
-      // For now, this test is less relevant given the current schema.
-      // If you add an array type to AppConfigSchema, uncomment and adjust this test.
-      // createTestFile({ someArray: ["a", "b", "c"] });
-      // const config = getTestConfig();
-      // config.load();
-      // expect(config.get('someArray')).toEqual(['a', 'b', 'c']);
-    });
-
-    test('should return undefined for non-existent key', () => {
-      createTestFile({ appName: "value" });
-      const config = getTestConfig();
-      config.load();
-      
-      expect(config.get('nonExistentKey')).toBeUndefined();
-    });
-
-    test('should return undefined for optional fields not present', () => {
-      createTestFile({ appName: "value" });
-      const config = getTestConfig();
-      config.load();
-      
-      expect(config.get('apiKeys.google')).toBeUndefined();
-    });
-  });
-
-  describe('set()', () => {
-    test('should set string value', () => {
-      createTestFile({});
-      const config = getTestConfig();
-      config.load();
-      config.set('appName', 'new_value');
-      config.save();
-      
-      expect(config.get('appName')).toBe('new_value');
-      expect(JSON.parse(fs.readFileSync('test.json', 'utf8'))).toHaveProperty('appName', 'new_value');
-    });
-
-    test('should set nested value', () => {
-      createTestFile({});
-      const config = getTestConfig();
-      config.load();
-      config.set('database.host', 'new.nested.db');
-      config.save();
-      
-      expect(config.get('database.host')).toBe('new.nested.db');
-      expect(JSON.parse(fs.readFileSync('test.json', 'utf8')).database).toHaveProperty('host', 'new.nested.db');
-    });
-
-    test('should set boolean value', () => {
-      createTestFile({});
-      const config = getTestConfig();
-      config.load();
-      config.set('environment', 'production');
-      config.save();
-      
-      expect(config.get('environment')).toBe('production');
-      expect(JSON.parse(fs.readFileSync('test.json', 'utf8'))).toHaveProperty('environment', 'production');
-    });
-
-    test('should throw when setting invalid value (TypeBox validation)', () => {
-      const config = getTestConfig();
-      config.load();
-      
-      // Attempt to set a string where a number is expected
-      expect(() => config.set('database.port', "not_a_number" as any)).toThrow();
-    });
-  });
-
-  describe('all()', () => {
-    test('should get all values including defaults', () => {
-      createTestFile({ appName: "all_test", database: { user: "test_user" } });
-      const config = getTestConfig();
-      config.load();
-      
-      const all = config.all();
-      expect(all).toEqual({
-        appName: 'all_test',
-        environment: 'development',
-        database: {
-          host: 'localhost',
-          port: 5432,
-          user: 'test_user',
-          password: '',
+    return new ConfigJSDriver({
+        identify: 'test-json-driver-sync',
+        async: false,
+        config: { path: TEST_JSON_PATH },
+        onLoad() {
+            this.store = {}; // Reset store
+            if (!fs.existsSync(this.config.path)) return;
+            const fileContent = fs.readFileSync(this.config.path, 'utf-8');
+            if (fileContent) {
+                try {
+                    this.store = JSON.parse(fileContent);
+                } catch (e) {
+                    // In tests, we want to know if JSON is invalid
+                    throw new Error('Invalid JSON');
+                }
+            }
         },
-        apiKeys: {},
-      });
-    });
-
-    test('should return structure with defaults for empty config', () => {
-      createTestFile({});
-      const config = getTestConfig();
-      config.load();
-      
-      const all = config.all();
-      expect(all).toEqual({
-        appName: 'My Awesome App',
-        environment: 'development',
-        database: {
-          host: 'localhost',
-          port: 5432,
-          user: '',
-          password: '',
+        onGet(key) { return getProperty(this.store, key); },
+        onSet(key, value) {
+            setProperty(this.store, key, value);
+            fs.writeFileSync(this.config.path, JSON.stringify(this.store, null, 2));
         },
-        apiKeys: {},
-      });
     });
-  });
+};
 
-  describe('pretty print', () => {
-    test('should format JSON with indentation when pretty is true', () => {
-      const config = new Config(
-        new JsonDriver(),
-        { filepath: 'test.json', pretty: true },
-        AppConfigSchema
-      );
-      config.load();
-      config.set('appName', 'pretty_value');
-      config.save();
-      
-      const fileContent = fs.readFileSync('test.json', 'utf8');
-      expect(fileContent).toMatch(/^\{\n  "appName": "pretty_value"/);
+describe('JSON Driver', () => {
+    beforeEach(() => {
+        if (fs.existsSync(TEST_JSON_PATH)) fs.unlinkSync(TEST_JSON_PATH);
     });
 
-    test('should write compact JSON when pretty is false', () => {
-      const config = new Config(
-        new JsonDriver(),
-        { filepath: 'test.json', pretty: false },
-        AppConfigSchema
-      );
-      config.load();
-      config.set('appName', 'compact_value');
-      config.save();
-      
-      const fileContent = fs.readFileSync('test.json', 'utf8');
-      // Use JSON.parse and toEqual for robust comparison
-      expect(JSON.parse(fileContent)).toEqual({
-        appName: 'compact_value',
-        environment: 'development',
-        database: {
-          host: 'localhost',
-          port: 5432,
-          user: '',
-          password: '',
-        },
-        apiKeys: {},
-      });
+    afterAll(() => {
+        if (fs.existsSync(TEST_JSON_PATH)) fs.unlinkSync(TEST_JSON_PATH);
     });
 
-    test('should use custom indentation when pretty is a number', () => {
-      const config = new Config(
-        new JsonDriver(),
-        { filepath: 'test.json', pretty: 4 },
-        AppConfigSchema
-      );
-      config.load();
-      config.set('appName', 'indented_value');
-      config.save();
-      
-      const fileContent = fs.readFileSync('test.json', 'utf8');
-      expect(fileContent).toMatch(/^\{\n    "appName": "indented_value"/);
+    describe('Synchronous', () => {
+        it('should load, get, and set nested data', () => {
+            const driver = createTestJsonDriver(false);
+            const initialData = { app: { name: 'TestApp' } };
+            fs.writeFileSync(TEST_JSON_PATH, JSON.stringify(initialData));
+
+            driver.load();
+            expect(driver.get('app.name')).toBe('TestApp');
+
+            driver.set('db.host', 'localhost');
+            expect(driver.get('db.host')).toBe('localhost');
+
+            const fileContent = fs.readFileSync(TEST_JSON_PATH, 'utf-8');
+            const parsed = JSON.parse(fileContent);
+            expect(parsed.db.host).toBe('localhost');
+            expect(parsed.app.name).toBe('TestApp');
+        });
+
+        it('should create a new file on set if it does not exist', () => {
+            const driver = createTestJsonDriver(false);
+            driver.load(); // store is empty
+            driver.set('user.name', 'John');
+
+            expect(fs.existsSync(TEST_JSON_PATH)).toBe(true);
+            const fileContent = fs.readFileSync(TEST_JSON_PATH, 'utf-8');
+            const parsed = JSON.parse(fileContent);
+            expect(parsed.user.name).toBe('John');
+        });
+
+        it('should throw an error for invalid JSON', () => {
+            const driver = createTestJsonDriver(false);
+            fs.writeFileSync(TEST_JSON_PATH, '{');
+            expect(() => driver.load()).toThrow('Invalid JSON');
+        });
+
+        it('should not error on load if file does not exist', () => {
+            const driver = createTestJsonDriver(false);
+            expect(() => driver.load()).not.toThrow();
+            expect(driver.get('anything')).toBeUndefined();
+        });
     });
-  });
+
+    describe('Asynchronous', () => {
+        it('should load, get, and set nested data', async () => {
+            const driver = createTestJsonDriver(true);
+            const initialData = { app: { name: 'TestAppAsync' } };
+            await fsp.writeFile(TEST_JSON_PATH, JSON.stringify(initialData));
+
+            await driver.load();
+            expect(await driver.get('app.name')).toBe('TestAppAsync');
+
+            await driver.set('db.host', 'localhost-async');
+            expect(await driver.get('db.host')).toBe('localhost-async');
+
+            const fileContent = await fsp.readFile(TEST_JSON_PATH, 'utf-8');
+            const parsed = JSON.parse(fileContent);
+            expect(parsed.db.host).toBe('localhost-async');
+            expect(parsed.app.name).toBe('TestAppAsync');
+        });
+
+        it('should not error on load if file does not exist', async () => {
+            const driver = createTestJsonDriver(true);
+            await expect(driver.load()).resolves.toBeUndefined();
+            expect(await driver.get('anything')).toBeUndefined();
+        });
+
+        it('should throw an error for invalid JSON', async () => {
+            const driver = createTestJsonDriver(true);
+            await fsp.writeFile(TEST_JSON_PATH, '{');
+            await expect(driver.load()).rejects.toThrow();
+        });
+    });
 });

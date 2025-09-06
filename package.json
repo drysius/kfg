@@ -1,8 +1,8 @@
 {
   "name": "@caeljs/config",
   "type": "module",
-  "description": "Simple system of standardization of configurations for node js.",
-  "version": "0.9.22",
+  "description": "Simple system of standardization of configurations for node js and bun.",
+  "version": "0.9.30",
   "main": "cjs/index.cjs",
   "module": "esm/index.js",
   "types": "index.d.ts",
@@ -49,16 +49,19 @@
   },
   "homepage": "https://github.com/drylian/configjs#readme",
   "scripts": {
-    "build": "bun run build.ts"
+    "build": "bun run build.ts",
+    "test": "bun test",
+    "check": "bunx biome check src/** --write"
   },
   "devDependencies": {
-    "@types/bun": "^1.2.10",
-    "@types/node": "^22.15.2",
+    "@biomejs/biome": "2.2.2",
+    "@types/bun": "^1.2.21",
+    "@types/node": "^24.3.0",
     "dts-bundle-generator": "^9.5.1",
     "tsup": "^8.4.0",
     "typescript": "^5.8.3"
   },
   "dependencies": {
-    "@sinclair/typebox": "^0.32.32"
+    "@sinclair/typebox": "^0.34.41"
   }
 }

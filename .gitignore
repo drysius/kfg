@@ -3,6 +3,7 @@ node_modules
 cjs
 esm
 ConfigJS.d.ts
+config.json
 # output
 out
 dist

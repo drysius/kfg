@@ -1,52 +1,32 @@
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { type Static, type TSchema } from '@sinclair/typebox';
-import { Value } from '@sinclair/typebox/value';
-import type { ConfigDriver } from '../types';
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { ConfigJSDriver } from "../driver";
+import { getProperty, setProperty } from "../utils/object";
 
-export interface JsonDriverConfig {
-  filepath: string;
-  pretty?: boolean | number;
+function getFilePath(config: { path?: string }): string {
+	return path.resolve(process.cwd(), config.path || "config.json");
 }
 
-export class JsonDriver implements ConfigDriver<false, JsonDriverConfig> {
-  readonly async = false;
-
-  load<T extends TSchema>(schema: T, config: JsonDriverConfig): Static<T> {
-    let data: any = {};
-    const fileExists = existsSync(config.filepath);
-
-    if (!fileExists) {
-      // If file doesn't exist, create it with an empty JSON object
-      writeFileSync(config.filepath, '{}', 'utf8');
-      data = {};
-    } else {
-      try {
-        const content = readFileSync(config.filepath, 'utf8');
-        if (content.trim() === '') { // Handle empty file content
-          data = {};
-          // Write back empty object to file for consistency
-          writeFileSync(config.filepath, '{}', 'utf8');
-        } else {
-          data = JSON.parse(content);
-        }
-      } catch (error) {
-        console.error(`[JsonDriver] Error parsing JSON from ${config.filepath}:`, error);
-        data = {}; // Fallback to empty object on parse error
-        // Write back empty object to file on parse error for consistency
-        writeFileSync(config.filepath, '{}', 'utf8');
-      }
-    }
-
-    // Validate and return the data, applying defaults if necessary
-    if (!Value.Check(schema, data)) {
-      console.warn(`[JsonDriver] Loaded data from ${config.filepath} does not match schema. Attempting to cast.`);
-    }
-    return Value.Cast(schema, data);
-  }
-
-  save<T extends TSchema>(data: Static<T>, schema: T, config: JsonDriverConfig): void {
-    const spaces = typeof config.pretty === 'number' ? config.pretty : config.pretty ? 2 : undefined;
-    const content = JSON.stringify(data, null, spaces);
-    writeFileSync(config.filepath, content, 'utf8');
-  }
-}
+export const jsonDriver = new ConfigJSDriver({
+	identify: "json-driver",
+	async: false,
+	config: { path: "config.json" },
+	getEnvKeyForPath: (path) => path,
+	onLoad() {
+		this.store = {}; // Reset store
+		const filePath = getFilePath(this.config);
+		if (!fs.existsSync(filePath)) {
+			return;
+		}
+		const fileContent = fs.readFileSync(filePath, "utf-8");
+		this.store = JSON.parse(fileContent);
+	},
+	onGet(key) {
+		return getProperty(this.store, key);
+	},
+	onSet(key, value) {
+		setProperty(this.store, key, value);
+		const filePath = getFilePath(this.config);
+		fs.writeFileSync(filePath, JSON.stringify(this.store, null, 2));
+	},
+});

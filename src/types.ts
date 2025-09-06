@@ -1,19 +1,103 @@
-import type { TSchema, Static } from '@sinclair/typebox';
+import type { Static, TSchema } from "@sinclair/typebox";
+import type { ConfigJSDriver } from "./driver";
 
-// Helper type for conditional types
-export type If<Condition extends boolean, TrueType, FalseType> = Condition extends true ? TrueType : FalseType;
+// --- Driver Related Types ---
 
-// Generic type for a configuration schema, which can be any TypeBox schema
-export type ConfigSchema = TSchema;
+export type Paths<T> = T extends object
+	? {
+			[K in keyof T]: K extends string
+				? T[K] extends object
+					? `${K}.${Paths<T[K]>}`
+					: K
+				: never;
+		}[keyof T]
+	: never;
 
-// Type for the inferred static type of a ConfigSchema
-export type ConfigType<T extends ConfigSchema> = Static<T>;
+export type RootPaths<T> = T extends object
+	? {
+			[K in keyof T]: K extends string
+				? T[K] extends object
+					? K | `${K}.${RootPaths<T[K]>}`
+					: never
+				: never;
+		}[keyof T]
+	: never;
 
-// Interface for a configuration driver
-export interface ConfigDriver<IsAsync extends boolean, TConfig extends object = {}> {
-  readonly async: IsAsync;
-  // Loads configuration data based on a schema
-  load<T extends ConfigSchema>(schema: T, config: TConfig): If<IsAsync, Promise<ConfigType<T>>, ConfigType<T>>;
-  // Saves configuration data
-  save<T extends ConfigSchema>(data: ConfigType<T>, schema: T, config: TConfig): If<IsAsync, Promise<void>, void>;
+export type DeepGet<T, P extends string> = P extends `${infer K}.${infer R}`
+	? K extends keyof T
+		? DeepGet<T[K], R>
+		: never
+	: P extends keyof T
+		? T[P]
+		: never;
+
+export type inPromise<Async extends boolean, Result> = Async extends true
+	? Promise<Result>
+	: Result;
+
+export type DriverConfig = Record<string, unknown>;
+export type DriverStore = Record<string, unknown>;
+
+export type DriverOnLoad<
+	C extends DriverConfig,
+	S extends DriverStore,
+	A extends boolean,
+> = (this: ConfigJSDriver<C, S, A>, opts: Partial<C>) => inPromise<A, void>;
+export type DriverOnGet<
+	C extends DriverConfig,
+	S extends DriverStore,
+	A extends boolean,
+> = (this: ConfigJSDriver<C, S, A>, key: string) => inPromise<A, unknown>;
+export type DriverOnSet<
+	C extends DriverConfig,
+	S extends DriverStore,
+	A extends boolean,
+> = (
+	this: ConfigJSDriver<C, S, A>,
+	key: string,
+	value: unknown,
+	options?: { description?: string },
+) => inPromise<A, void>;
+
+export interface ConfigJSDriverOptions<
+	C extends DriverConfig,
+	S extends DriverStore,
+	A extends boolean,
+> {
+	identify: string;
+	async: A;
+	config: C;
+	getEnvKeyForPath?: (path: string) => string;
+	onLoad?: DriverOnLoad<C, S, A>;
+	onGet?: DriverOnGet<C, S, A>;
+	onSet?: DriverOnSet<C, S, A>;
+}
+
+// --- Schema Related Types ---
+
+/**
+ * A recursive type representing the user-friendly schema definition.
+ */
+export type SchemaDefinition = {
+	[key: string]: TSchema | SchemaDefinition;
+};
+
+/**
+ * A mapped type that converts a SchemaDefinition into a static TypeScript type.
+ */
+export type StaticSchema<T> = T extends TSchema
+	? Static<T>
+	: T extends SchemaDefinition
+		? { -readonly [K in keyof T]: StaticSchema<T[K]> }
+		: never;
+
+/**
+ * Custom metadata properties that can be added to a schema.
+ */
+export interface CustomOptions {
+	description?: string;
+	important?: boolean;
+	initial_save?: boolean;
+	prop?: string;
+	refines?: ((value: unknown) => boolean | string)[];
 }
