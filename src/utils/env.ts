@@ -60,10 +60,15 @@ export function updateEnvContent(
 	let keyFound = false;
 	const newLines = [...lines];
 
-	const stringValue = String(value);
-	const formattedValue = /[\s"'#]/.test(stringValue)
-		? `"${stringValue.replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`
-		: stringValue;
+	let formattedValue: string;
+	if (Array.isArray(value)) {
+		formattedValue = JSON.stringify(value);
+	} else {
+		const stringValue = String(value);
+		formattedValue = /[\s"'#]/.test(stringValue)
+			? `"${stringValue.replace(/"/g, '\"').replace(/\n/g, "\\n")}"`
+			: stringValue;
+	}
 
 	let lineIndex = -1;
 	for (let i = 0; i < lines.length; i++) {

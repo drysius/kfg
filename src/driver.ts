@@ -230,6 +230,19 @@ export class ConfigJSDriver<
 		if (schema.type === "number") return Number(value);
 		if (schema.type === "boolean")
 			return String(value).toLowerCase() === "true";
+		if (schema.type === "array" && typeof value === "string") {
+			const trimmedValue = value.trim();
+			if (trimmedValue.startsWith("[") && trimmedValue.endsWith("]")) {
+				try {
+					return JSON.parse(trimmedValue);
+				} catch (e) {
+					// Not valid JSON, fall through to let validation handle it.
+				}
+			} else if (trimmedValue.includes(",")) {
+				if (trimmedValue === "") return [];
+				return trimmedValue.split(",").map((s) => s.trim());
+			}
+		}
 		return value;
 	}
 

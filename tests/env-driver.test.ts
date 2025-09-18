@@ -78,4 +78,18 @@ describe('ENV Driver', () => {
         const fileContent = fs.readFileSync(TEST_ENV_PATH, 'utf-8');
         expect(fileContent).toContain('APP_NAME="My Awesome App"');
     });
+
+    it('should handle array values as JSON strings', () => {
+        const driver = createTestEnvDriver();
+        const anArray = ['item1', 'item with space', 'item,with,comma'];
+        driver.set('MY_ARRAY', anArray);
+        const fileContent = fs.readFileSync(TEST_ENV_PATH, 'utf-8');
+        expect(fileContent).toContain('MY_ARRAY=["item1","item with space","item,with,comma"]');
+
+        // Now, load it back and check if it's parsed correctly
+        driver.load();
+        // The driver's store will have the raw string because this test driver
+        // doesn't perform the final coercion step.
+        expect(driver.get('MY_ARRAY')).toBe('["item1","item with space","item,with,comma"]');
+    });
 });

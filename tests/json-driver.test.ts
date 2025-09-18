@@ -122,6 +122,20 @@ describe('JSON Driver', () => {
             expect(() => driver.load()).not.toThrow();
             expect(driver.get('anything')).toBeUndefined();
         });
+
+        it('should handle array values', () => {
+            const driver = createTestJsonDriver(false);
+            driver.load();
+            const anArray = ['item1', 'item2', { nested: true }];
+            driver.set('data.items', anArray);
+
+            const fileContent = fs.readFileSync(TEST_JSON_PATH, 'utf-8');
+            const parsed = JSON.parse(fileContent);
+            expect(parsed.data.items).toEqual(anArray);
+
+            // Check if get returns the array correctly
+            expect(driver.get('data.items')).toEqual(anArray);
+        });
     });
 
     describe('Asynchronous', () => {
