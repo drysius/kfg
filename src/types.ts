@@ -106,8 +106,9 @@ export type StaticSchema<T> =
 /**
  * Custom metadata properties that can be added to a schema.
  */
-export interface CustomOptions {
+export interface CustomOptions<Default extends any = any> {
 	description?: string;
+	default?:Default;
 	important?: boolean;
 	initial_save?: boolean;
 	prop?: string;

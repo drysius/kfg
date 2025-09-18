@@ -1,4 +1,8 @@
 import { c, ConfigJS, envDriver } from './src';
+enum AppTest {
+    a,
+    n
+}
 const config = new ConfigJS(envDriver, {
     app: {
         port: c.number({
@@ -15,15 +19,20 @@ const config = new ConfigJS(envDriver, {
         default: true
     }),
     num_one: c.boolean({
-        default: true
+        default: false
     }),
     owners: c.array(c.string(), {
         default: [],
-        prop: 'BOT_OWNERS',
+        description: "The Owners of bot"
+    }),
+    test: c.enum(AppTest, {
+        default: AppTest.a,
         description: "The Owners of bot"
     }),
 });
+
 config.load();
-console.log(config.get('owners'))
+console.log(config.get('num_one'))
+console.log(config.get('test'))
 config.set('owners',["test", 'aaaaa', '123'])
 config.set('app.port', 3000);

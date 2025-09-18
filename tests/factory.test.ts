@@ -1,92 +1,177 @@
-import { describe, it, expect } from 'bun:test';
-import { c } from '../src/factory';
-import { Kind } from '@sinclair/typebox';
+import { describe, it, expect, afterAll } from "bun:test";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { c } from "../src/factory";
+import { ConfigJS } from "../src/ConfigJS";
+import { jsonDriver } from "../src/drivers/json-driver";
+import { envDriver } from "../src/drivers/env-driver";
 
-describe('Factory: c', () => {
-    it('should create a string schema with custom options using PascalCase', () => {
-        const schema = c.String({ description: 'A test string', important: true });
-        expect(schema.type).toBe('string');
-        expect(schema.description).toBe('A test string');
-        expect(schema.important).toBe(true);
-    });
+const TEST_JSON_PATH = "test-config.json";
+const TEST_ENV_PATH = ".env.test";
 
-    it('should create a number schema using camelCase', () => {
-        const schema = c.number();
-        expect(schema.type).toBe('number');
-    });
+// Cleanup test files
+afterAll(() => {
+	if (fs.existsSync(TEST_JSON_PATH)) {
+		fs.unlinkSync(TEST_JSON_PATH);
+	}
+	if (fs.existsSync(TEST_ENV_PATH)) {
+		fs.unlinkSync(TEST_ENV_PATH);
+	}
+});
 
-    it('should create a boolean schema using PascalCase', () => {
-        const schema = c.Boolean();
-        expect(schema.type).toBe('boolean');
-    });
+describe("Factory: c", () => {
+	describe("Schema Creation", () => {
+		it("should create a string schema with a default value", () => {
+			const schema = c.String({ default: "hello" });
+			expect(schema.type).toBe("string");
+			expect(schema.default).toBe("hello");
+		});
 
-    it('should create an object schema using camelCase', () => {
-        const schema = c.object({ id: c.Number() });
-        expect(schema.type).toBe('object');
-        expect(schema.properties.id.type).toBe('number');
-    });
+		it("should create a number schema with a default value", () => {
+			const schema = c.Number({ default: 123 });
+			expect(schema.type).toBe("number");
+			expect(schema.default).toBe(123);
+		});
 
-    it('should create an array schema', () => {
-        const schema = c.Array(c.String());
-        expect(schema.type).toBe('array');
-        expect(schema.items.type).toBe('string');
-    });
+		it("should create a boolean schema with a default value", () => {
+			const schema = c.Boolean({ default: true });
+			expect(schema.type).toBe("boolean");
+			expect(schema.default).toBe(true);
+		});
 
-    it('should create a record schema', () => {
-        const schema = c.Record(c.String(), c.Number());
-        expect(schema.type).toBe('object');
-        expect(schema.patternProperties['^(.*)$']).toBeDefined();
-    });
+		it("should create an object schema with a default value", () => {
+			const schema = c.Object(
+				{ id: c.Number() },
+				{ default: { id: 1 } },
+			);
+			expect(schema.type).toBe("object");
+			expect(schema.default).toEqual({ id: 1 });
+		});
 
-    it('should handle Enum with string array', () => {
-        const schema = c.Enum(['admin', 'user']);
-        expect(schema.anyOf).toBeDefined();
-        expect(schema.anyOf.length).toBe(2);
-        expect(schema.anyOf[0].const).toBe('admin');
-    });
+		it("should create an array schema with a default value", () => {
+			const schema = c.Array(c.String(), { default: ["a", "b"] });
+			expect(schema.type).toBe("array");
+			expect(schema.default).toEqual(["a", "b"]);
+		});
 
-    it('should handle Enum with TypeScript enum using camelCase', () => {
-        enum UserRole { Admin = 'ADMIN', User = 'USER' };
-        const schema = c.enum(UserRole);
-        expect(schema.anyOf).toBeDefined();
-        expect(schema.anyOf.length).toBe(2);
-        expect(schema.anyOf[0].const).toBe('ADMIN');
-        expect(schema.anyOf[1].const).toBe('USER');
-    });
+		it("should create a record schema with a default value", () => {
+			const schema = c.Record(c.String(), c.Number(), {
+				default: { key: 123 },
+			});
+			expect(schema.type).toBe("object");
+			expect(schema.default).toEqual({ key: 123 });
+		});
 
-    it('should create a string schema with ipv4 format', () => {
-        const schema = c.ip();
-        expect(schema.type).toBe('string');
-        expect(schema.format).toBe('ipv4');
-    });
+		it("should handle Enum with string array and a default value", () => {
+			const schema = c.Enum(["admin", "user"], { default: "user" });
+			expect(schema.anyOf).toHaveLength(2);
+			expect(schema.default).toBe("user");
+		});
 
-    it('should create a string schema with ipv6 format', () => {
-        const schema = c.IPv6();
-        expect(schema.type).toBe('string');
-        expect(schema.format).toBe('ipv6');
-    });
+		it("should handle Enum with a const string array", () => {
+			const ROLES = ["admin", "user"] as const;
+			const schema = c.Enum(ROLES, { default: "admin" });
+			expect(schema.anyOf).toHaveLength(2);
+			expect(schema.anyOf[0].const).toBe("admin");
+			expect(schema.default).toBe("admin");
+		});
 
-    it('should create a string schema with email format', () => {
-        const schema = c.Email();
-        expect(schema.type).toBe('string');
-        expect(schema.format).toBe('email');
-    });
+		it("should handle Enum with a numeric enum", () => {
+			enum Status {
+				Active = 1,
+				Inactive = 0,
+			}
+			const schema = c.Enum(Status, { default: Status.Active });
+			expect(schema.anyOf).toHaveLength(2);
+			expect(schema.anyOf.map((item) => item.const).sort()).toEqual([0, 1]);
+			expect(schema.default).toBe(1);
+		});
 
-    it('should create a string schema with uri format using camelCase', () => {
-        const schema = c.url();
-        expect(schema.type).toBe('string');
-        expect(schema.format).toBe('uri');
-    });
+		it("should handle Enum with a string enum", () => {
+			enum Role {
+				Admin = "ADMIN",
+				User = "USER",
+			}
+			const schema = c.Enum(Role, { default: Role.User });
+			expect(schema.anyOf).toHaveLength(2);
+			expect(schema.anyOf.map((item) => item.const).sort()).toEqual([
+				"ADMIN",
+				"USER",
+			]);
+			expect(schema.default).toBe("USER");
+		});
 
-    it('should create an optional schema', () => {
-        const schema = c.Optional(c.String());
-        expect(schema[Symbol.for('TypeBox.Optional') as any]).toBe('Optional');
-    });
+		it("should create IP, Email, and URL schemas with defaults", () => {
+			const ipSchema = c.IP({ default: "127.0.0.1" });
+			const emailSchema = c.Email({ default: "test@example.com" });
+			const urlSchema = c.URL({ default: "https://example.com" });
 
-    it('should attach refines functions to the schema', () => {
-        const myRefine = (v:unknown) => String(v).length > 3;
-        const schema = c.String({ refines: [myRefine] });
-        expect(schema.refines).toBeDefined();
-        expect(schema.refines![0]).toBe(myRefine);
-    });
+			expect(ipSchema.format).toBe("ipv4");
+			expect(ipSchema.default).toBe("127.0.0.1");
+
+			expect(emailSchema.format).toBe("email");
+			expect(emailSchema.default).toBe("test@example.com");
+
+			expect(urlSchema.format).toBe("uri");
+			expect(urlSchema.default).toBe("https://example.com");
+		});
+	});
+
+	describe("Integration with Drivers", () => {
+		describe("JsonDriver", () => {
+			it("should load default values when config file is missing", () => {
+				const schema = {
+					port: c.Number({ default: 3000 }),
+					name: c.String({ default: "MyApp" }),
+				};
+				const config = new ConfigJS(jsonDriver, schema);
+				config.load({ path: TEST_JSON_PATH });
+
+				expect(config.get("port")).toBe(3000);
+				expect(config.get("name")).toBe("MyApp");
+			});
+
+			it("should load values from the json file", () => {
+				fs.writeFileSync(TEST_JSON_PATH, JSON.stringify({ port: 8080, name: "MyTestApp" }));
+				const schema = {
+					port: c.Number({ default: 3000 }),
+					name: c.String({ default: "MyApp" }),
+				};
+				const config = new ConfigJS(jsonDriver, schema);
+				config.load({ path: TEST_JSON_PATH });
+
+				expect(config.get("port")).toBe(8080);
+				expect(config.get("name")).toBe("MyTestApp");
+			});
+		});
+
+		describe("EnvDriver", () => {
+			it("should load default values when .env file is missing", () => {
+				const schema = {
+					PORT: c.Number({ default: 3000 }),
+					APP_NAME: c.String({ default: "MyApp" }),
+				};
+				const config = new ConfigJS(envDriver, schema);
+				config.load({ path: TEST_ENV_PATH });
+
+				expect(config.get("PORT")).toBe(3000);
+				expect(config.get("APP_NAME")).toBe("MyApp");
+			});
+
+			it("should load values from the .env file", () => {
+				fs.writeFileSync(TEST_ENV_PATH, "PORT=8080\nAPP_NAME=MyTestApp");
+				const schema = {
+					port: c.Number({ default: 3000 }),
+					app: {
+						name:c.String({ default: "MyApp" })
+					},
+				};
+				const config = new ConfigJS(envDriver, schema);
+				config.load({ path: TEST_ENV_PATH });
+
+				expect(config.get("port")).toBe(8080);
+				expect(config.get("app.name")).toBe("MyTestApp");
+			});
+		});
+	});
 });

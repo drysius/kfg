@@ -44,8 +44,12 @@ export class ConfigJSDriver<
 		this._getEnvKeyForPathOverridden = options.getEnvKeyForPath;
 	}
 
-	public load(schema?: TObject, options?: Partial<C>): inPromise<Async, void> {
+	public load(schema?: TObject, options: Partial<C> = {}): inPromise<Async, void> {
 		if (schema) this.compiledSchema = schema;
+		this.config = {
+			...this.config,
+			...options
+		}
 
 		const afterSaves = () => {
 			this.validate();

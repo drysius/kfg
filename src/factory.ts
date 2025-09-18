@@ -12,64 +12,109 @@ import {
 } from "@sinclair/typebox";
 import type { CustomOptions } from "./types";
 
-// Helper function to filter numeric keys from string enums
-function getEnumValues(enumType: object): string[] {
-	return Object.values(enumType).filter((value) => typeof value === "string");
+// Helper function to extract values from string arrays, const arrays, or enums
+function getEnumValues<T extends readonly (string | number)[] | object>(
+	values: T,
+): (string | number)[] {
+	if (Array.isArray(values)) {
+		return values as (string | number)[];
+	}
+	// For enums, filter out numeric keys if it's a numeric enum
+	const isNumericEnum = Object.values(values).some(
+		(v) => typeof v === "number",
+	);
+	if (isNumericEnum) {
+		return Object.values(values).filter(
+			(v) => typeof v === "number",
+		) as number[];
+	}
+	return Object.values(values).filter(
+		(v) => typeof v === "string",
+	) as string[];
 }
 
 const _c = {
 	/** Creates a String schema. */
-	String: (options?: StringOptions & CustomOptions) => Type.String(options),
+	String: <TDefault extends string>(
+		options?: StringOptions & CustomOptions<TDefault>,
+	) => Type.String(options),
 
 	/** Creates a Number schema. */
-	Number: (options?: NumberOptions & CustomOptions) => Type.Number(options),
+	Number: <TDefault extends number>(
+		options?: NumberOptions & CustomOptions<TDefault>,
+	) => Type.Number(options),
 
 	/** Creates a Boolean schema. */
-	Boolean: (options?: SchemaOptions & CustomOptions) => Type.Boolean(options),
+	Boolean: <TDefault extends boolean>(
+		options?: Omit<SchemaOptions, 'default'> & CustomOptions<TDefault>,
+	) => Type.Boolean(options),
 
 	/** Creates an Object schema. */
-	Object: (properties: TProperties, options?: ObjectOptions & CustomOptions) =>
-		Type.Object(properties, options),
+	Object: <
+		Properties extends TProperties,
+		TDefault extends Record<string, any>,
+	>(
+		properties: Properties,
+		options?: ObjectOptions & CustomOptions<TDefault>,
+	) => Type.Object(properties, options),
 
 	/** Creates an Array schema. */
-	Array: <Schema extends TSchema>(
+	Array: <Schema extends TSchema, TDefault extends any[]>(
 		items: Schema,
-		options?: ArrayOptions & CustomOptions,
+		options?: ArrayOptions & CustomOptions<TDefault>,
 	) => Type.Array(items, options),
 
 	/** Creates a Record schema. */
-	Record: <K extends TSchema, V extends TSchema>(
+	Record: <
+		K extends TSchema,
+		V extends TSchema,
+		TDefault extends Record<string, any>,
+	>(
 		key: K,
 		value: V,
-		options?: SchemaOptions & CustomOptions,
+		options?: Omit<SchemaOptions, 'default'> & CustomOptions<TDefault>,
 	) => Type.Record(key, value, options),
 
-	/** Creates a Union of Literals from a string array or a TypeScript string enum. */
-	Enum: <T extends string[] | object>(
+	/** Creates a Union of Literals from a string array, const array, or a TypeScript enum. */
+	Enum: <
+		T extends readonly (string | number)[] | object,
+		TValues = T extends readonly (infer U)[]
+			? U
+			: T extends object
+				? T[keyof T]
+				: never,
+	>(
 		values: T,
-		options?: CustomOptions,
-	): TUnion<TLiteral<string>[]> => {
-		const enumValues = Array.isArray(values)
-			? values
-			: getEnumValues(values as object);
-		return Type.Union(enumValues.map((v) => Type.Literal(v)), options);
+		options?: CustomOptions<TValues> & Omit<SchemaOptions, 'default'>,
+		//@ts-expect-error ignore
+	): TUnion<TLiteral<TValues>[]> => {
+		const enumValues = getEnumValues(values);
+		return Type.Union(
+			enumValues.map((v) => Type.Literal(v)),
+			options,
+			//@ts-expect-error ignore
+		) as TUnion<TLiteral<TValues>[]>;
 	},
 
 	/** Creates a string schema with 'ipv4' format. */
-	IP: (options?: StringOptions & CustomOptions) =>
-		Type.String({ ...options, format: "ipv4" }),
+	IP: <TDefault extends string>(
+		options?: StringOptions & CustomOptions<TDefault>,
+	) => Type.String({ ...options, format: "ipv4" }),
 
 	/** Creates a string schema with 'ipv6' format. */
-	IPv6: (options?: StringOptions & CustomOptions) =>
-		Type.String({ ...options, format: "ipv6" }),
+	IPv6: <TDefault extends string>(
+		options?: StringOptions & CustomOptions<TDefault>,
+	) => Type.String({ ...options, format: "ipv6" }),
 
 	/** Creates a string schema with 'email' format. */
-	Email: (options?: StringOptions & CustomOptions) =>
-		Type.String({ ...options, format: "email" }),
+	Email: <TDefault extends string>(
+		options?: StringOptions & CustomOptions<TDefault>,
+	) => Type.String({ ...options, format: "email" }),
 
 	/** Creates a string schema with 'uri' format. */
-	URL: (options?: StringOptions & CustomOptions) =>
-		Type.String({ ...options, format: "uri" }),
+	URL: <TDefault extends string>(
+		options?: StringOptions & CustomOptions<TDefault>,
+	) => Type.String({ ...options, format: "uri" }),
 
 	/** Creates an Optional schema. */
 	Optional: <Schema extends TSchema>(schema: Schema) => Type.Optional(schema),
