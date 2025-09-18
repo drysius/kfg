@@ -138,6 +138,9 @@ export class ConfigJSDriver<
 
 	private validate(config = this.data): void {
 		if (!this.compiledSchema) return;
+		Value.Default(this.compiledSchema, config);
+		Value.Convert(this.compiledSchema, config);
+
 		if (!Value.Check(this.compiledSchema, config)) {
 			const errors = [...Value.Errors(this.compiledSchema, config)];
 			throw new Error(

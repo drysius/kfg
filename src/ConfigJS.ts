@@ -22,9 +22,9 @@ export class ConfigJS<
 	private compiledSchema: TObject;
 	private loaded = false;
 
-	constructor(config: { driver: D; schema: S }) {
-		this.driver = config.driver;
-		this.compiledSchema = this._buildSchema(config.schema);
+	constructor(driver: D, schema: S) {
+		this.driver = driver;
+		this.compiledSchema = this._buildSchema(schema);
 	}
 
 	public load(options?: D["config"]) {

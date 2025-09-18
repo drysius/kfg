@@ -33,10 +33,7 @@ export declare class ConfigJS<D extends ConfigJSDriver<any, any, any>, S extends
 	private driver;
 	private compiledSchema;
 	private loaded;
-	constructor(config: {
-		driver: D;
-		schema: S;
-	});
+	constructor(driver: D, schema: S);
 	load(options?: D["config"]): inPromise<D["async"], void>;
 	get<P extends Paths<StaticSchema<S>>>(path: P): inPromise<D["async"], DeepGet<StaticSchema<S>, P>>;
 	has<P extends Paths<StaticSchema<S>>>(path: P): inPromise<D["async"], boolean>;

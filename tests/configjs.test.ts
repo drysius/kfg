@@ -68,24 +68,24 @@ describe('ConfigJS', () => {
 
     describe('Core Functionality', () => {
         it('should require load() before get() or has()', () => {
-            const config = new ConfigJS({ driver: createMockDriver(false), schema: {} });
+            const config = new ConfigJS(createMockDriver(false), {});
+            //@ts-expect-error ignore, not typed
             expect(() => config.get('any')).toThrow('[ConfigJS] Config not loaded. Call load() first.');
+            //@ts-expect-error ignore, not typed
             expect(() => config.has('any')).toThrow('[ConfigJS] Config not loaded. Call load() first.');
         });
 
         it('should load, get, set, and check values correctly', () => {
             fs.writeFileSync(TEST_ENV_PATH, 'APP_NAME=MyTestApp\nFEATURE_ENABLED=true');
-            const config = new ConfigJS({
-                driver: createFileDriver(false),
-                schema: { app: { name: c.string() }, feature: { enabled: c.boolean() } }
-            });
-            
+            const config = new ConfigJS(createFileDriver(false), { app: { name: c.string() }, feature: { enabled: c.boolean() } });
+
             config.load();
 
             expect(config.get('app.name')).toBe('MyTestApp');
             expect(config.has('app.name')).toBe(true);
             expect(config.get('feature.enabled')).toBe(true);
             expect(config.has('feature.enabled')).toBe(true);
+            //@ts-expect-error ignore, not typed
             expect(config.has('nonexistent')).toBe(false);
 
             config.set('app.name', 'NewAppName');
@@ -96,14 +96,11 @@ describe('ConfigJS', () => {
 
         it('should coerce types correctly during load', () => {
             fs.writeFileSync(TEST_ENV_PATH, 'PORT=8080\nIS_LIVE=true\nIS_OFF=FALSE\nNUM_ONE=1');
-            const config = new ConfigJS({
-                driver: createFileDriver(false),
-                schema: {
-                    port: c.number(),
-                    is_live: c.boolean(),
-                    is_off: c.boolean(),
-                    num_one: c.boolean(),
-                }
+            const config = new ConfigJS(createFileDriver(false), {
+                port: c.number(),
+                is_live: c.boolean(),
+                is_off: c.boolean(),
+                num_one: c.boolean(),
             });
             config.load();
             expect(config.get('port')).toBe(8080);
@@ -117,13 +114,13 @@ describe('ConfigJS', () => {
         const complexSchema = {
             user: {
                 email: c.Email(),
-                role: c.Enum(['admin', 'user', 'guest']), 
+                role: c.Enum(['admin', 'user', 'guest']),
             },
             server: {
                 port: c.Number({
                     refines: [
-                        (v) => v > 1024 || 'Port must be > 1024',
-                        (v) => v < 65535 || 'Port must be < 65535'
+                        (v) => Number(v) > 1024 || 'Port must be > 1024',
+                        (v) => Number(v) < 65535 || 'Port must be < 65535'
                     ]
                 })
             }
@@ -131,19 +128,19 @@ describe('ConfigJS', () => {
 
         it('should pass with valid data', () => {
             const driver = createMockDriver(false, { 'USER_EMAIL': 'test@example.com', 'USER_ROLE': 'admin', 'SERVER_PORT': '3000' });
-            const config = new ConfigJS({ driver, schema: complexSchema });
+            const config = new ConfigJS(driver, complexSchema);
             expect(() => config.load()).not.toThrow();
         });
 
         it('should throw on invalid email format', () => {
             const driver = createMockDriver(false, { 'USER_EMAIL': 'invalid-email' });
-            const config = new ConfigJS({ driver, schema: { user: { email: c.Email() } } });
+            const config = new ConfigJS(driver, { user: { email: c.Email() } });
             expect(() => config.load()).toThrow(/to match 'email' format/);
         });
 
         it('should throw on failed refine validation', () => {
             const driver = createMockDriver(false, { 'USER_EMAIL': 'test@example.com', 'USER_ROLE': 'user', 'SERVER_PORT': '80' });
-            const config = new ConfigJS({ driver, schema: complexSchema });
+            const config = new ConfigJS(driver, complexSchema);
             expect(() => config.load()).toThrow('Port must be > 1024');
         });
 
@@ -152,7 +149,7 @@ describe('ConfigJS', () => {
                 identify: 'failing-driver', async: false, config: {},
                 onLoad: () => { throw new Error('Driver Failure'); }
             });
-            const config = new ConfigJS({ driver: failingDriver, schema: {} });
+            const config = new ConfigJS(failingDriver, {});
             expect(() => config.load()).toThrow('Driver Failure');
         });
     });
@@ -160,7 +157,7 @@ describe('ConfigJS', () => {
     describe('Data Manipulation', () => {
         it('should get a sub-object with root()', () => {
             const driver = createMockDriver(false, { 'SERVER_HOST': 'example.com', 'SERVER_PORT': '3000' });
-            const config = new ConfigJS({ driver, schema: { server: { host: c.String(), port: c.Number() } } });
+            const config = new ConfigJS(driver, { server: { host: c.String(), port: c.Number() } });
             config.load();
             const serverConfig = config.root('server');
             expect(serverConfig).toEqual({ host: 'example.com', port: 3000 });
@@ -168,7 +165,7 @@ describe('ConfigJS', () => {
 
         it('should insert a partial object and save it', () => {
             const driver = createMockDriver(false, { 'SERVER_HOST': 'example.com', 'SERVER_PORT': '3000' });
-            const config = new ConfigJS({ driver, schema: { server: { host: c.String(), port: c.Number() } } });
+            const config = new ConfigJS(driver, { server: { host: c.String(), port: c.Number() } });
             config.load();
             config.insert('server', { port: 9999 });
 
@@ -178,7 +175,7 @@ describe('ConfigJS', () => {
 
         it('should throw when trying to insert into a non-object', () => {
             const driver = createMockDriver(false, { 'SERVER_HOST': 'example.com' });
-            const config = new ConfigJS({ driver, schema: { server: { host: c.String() } } });
+            const config = new ConfigJS(driver, { server: { host: c.String() } });
             config.load();
             expect(() => config.insert('server.host' as any, { p: 1 })).toThrow(/Cannot set property/);
         });
@@ -187,13 +184,10 @@ describe('ConfigJS', () => {
     describe('Defaults and Initial Save', () => {
         it('should handle initial_save with default values (string, number, boolean)', () => {
             const driver = createFileDriver(false);
-            const config = new ConfigJS({
-                driver,
-                schema: {
-                    db: { host: c.String({ default: 'localhost', initial_save: true }) },
-                    app: { port: c.Number({ default: 3000, initial_save: true }) },
-                    feature: { active: c.Boolean({ default: false, initial_save: true }) }
-                }
+            const config = new ConfigJS(driver, {
+                db: { host: c.String({ default: 'localhost', initial_save: true }) },
+                app: { port: c.Number({ default: 3000, initial_save: true }) },
+                feature: { active: c.Boolean({ default: false, initial_save: true }) }
             });
 
             config.load();
@@ -210,10 +204,7 @@ describe('ConfigJS', () => {
         it('should not initial_save if a value is already present', () => {
             fs.writeFileSync(TEST_ENV_PATH, 'DB_HOST=remotehost');
             const driver = createFileDriver(false);
-            const config = new ConfigJS({
-                driver,
-                schema: { db: { host: c.String({ default: 'localhost', initial_save: true }) } }
-            });
+            const config = new ConfigJS(driver, { db: { host: c.String({ default: 'localhost', initial_save: true }) } });
 
             config.load();
             expect(config.get('db.host')).toBe('remotehost');
@@ -225,14 +216,14 @@ describe('ConfigJS', () => {
     describe('Async Operations', () => {
         it('should load configuration from an async driver', async () => {
             const driver = createMockDriver(true, { 'ASYNCKEY': 'asyncValue' });
-            const config = new ConfigJS({ driver, schema: { asyncKey: c.string() } });
+            const config = new ConfigJS(driver, { asyncKey: c.string() });
             await config.load();
             expect(await config.get('asyncKey')).toBe('asyncValue');
         });
 
         it('should set and insert with an async driver', async () => {
             const driver = createMockDriver(true, { 'APP_NAME': 'InitialApp', 'APP_VERSION': '0.9.0' });
-            const config = new ConfigJS({ driver, schema: { app: { name: c.string(), version: c.string() } } });
+            const config = new ConfigJS(driver, { app: { name: c.string(), version: c.string() } });
             await config.load();
 
             await config.set('app.name', 'NewApp');

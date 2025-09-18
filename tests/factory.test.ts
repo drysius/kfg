@@ -80,11 +80,11 @@ describe('Factory: c', () => {
 
     it('should create an optional schema', () => {
         const schema = c.Optional(c.String());
-        expect(schema[Symbol.for('TypeBox.Optional')]).toBe('Optional');
+        expect(schema[Symbol.for('TypeBox.Optional') as any]).toBe('Optional');
     });
 
     it('should attach refines functions to the schema', () => {
-        const myRefine = (v: string) => v.length > 3;
+        const myRefine = (v:unknown) => String(v).length > 3;
         const schema = c.String({ refines: [myRefine] });
         expect(schema.refines).toBeDefined();
         expect(schema.refines![0]).toBe(myRefine);
