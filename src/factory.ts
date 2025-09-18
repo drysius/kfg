@@ -32,8 +32,10 @@ const _c = {
 		Type.Object(properties, options),
 
 	/** Creates an Array schema. */
-	Array: (items: TSchema, options?: ArrayOptions & CustomOptions) =>
-		Type.Array(items, options),
+	Array: <Schema extends TSchema>(
+		items: Schema,
+		options?: ArrayOptions & CustomOptions,
+	) => Type.Array(items, options),
 
 	/** Creates a Record schema. */
 	Record: <K extends TSchema, V extends TSchema>(
@@ -50,10 +52,7 @@ const _c = {
 		const enumValues = Array.isArray(values)
 			? values
 			: getEnumValues(values as object);
-		return Type.Union(
-			enumValues.map((v) => Type.Literal(v)),
-			options,
-		);
+		return Type.Union(enumValues.map((v) => Type.Literal(v)), options);
 	},
 
 	/** Creates a string schema with 'ipv4' format. */
@@ -73,7 +72,7 @@ const _c = {
 		Type.String({ ...options, format: "uri" }),
 
 	/** Creates an Optional schema. */
-	Optional: <T extends TSchema>(schema: T) => Type.Optional(schema),
+	Optional: <Schema extends TSchema>(schema: Schema) => Type.Optional(schema),
 };
 
 /**

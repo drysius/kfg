@@ -17,7 +17,13 @@ const config = new ConfigJS(envDriver, {
     num_one: c.boolean({
         default: true
     }),
+    owners: c.array(c.string({
+        default: [],
+    }), {
+        prop: 'BOT_OWNERS',
+        description: "The Owners of bot"
+    }),
 });
 config.load();
-config.get('app.port')
+config.get('owners')
 config.set('app.port', 3000);

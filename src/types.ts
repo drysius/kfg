@@ -6,9 +6,11 @@ import type { ConfigJSDriver } from "./driver";
 export type Paths<T> = T extends object
 	? {
 			[K in keyof T]: K extends string
-				? T[K] extends object
-					? `${K}.${Paths<T[K]>}`
-					: K
+				? T[K] extends ReadonlyArray<any>
+					? K
+					: T[K] extends object
+						? `${K}.${Paths<T[K]>}` | K
+						: K
 				: never;
 		}[keyof T]
 	: never;
@@ -16,9 +18,11 @@ export type Paths<T> = T extends object
 export type RootPaths<T> = T extends object
 	? {
 			[K in keyof T]: K extends string
-				? T[K] extends object
-					? K | `${K}.${RootPaths<T[K]>}`
-					: never
+				? T[K] extends ReadonlyArray<any>
+					? K
+					: T[K] extends object
+						? K | `${K}.${RootPaths<T[K]>}`
+						: never
 				: never;
 		}[keyof T]
 	: never;
@@ -78,18 +82,26 @@ export interface ConfigJSDriverOptions<
 /**
  * A recursive type representing the user-friendly schema definition.
  */
-export type SchemaDefinition = {
-	[key: string]: TSchema | SchemaDefinition;
-};
-
+export type SchemaDefinition =
+	| TSchema // Qualquer schema TypeBox válido (string, number, array, etc.)
+	| {
+			[key: string]: SchemaDefinition;
+	  };
 /**
- * A mapped type that converts a SchemaDefinition into a static TypeScript type.
+ * A mapped type que converte um SchemaDefinition em tipo estático TypeScript.
+ * Agora com suporte a arrays do TypeBox.
  */
-export type StaticSchema<T> = T extends TSchema
-	? Static<T>
-	: T extends SchemaDefinition
-		? { -readonly [K in keyof T]: StaticSchema<T[K]> }
-		: never;
+export type StaticSchema<T> =
+	// Se for um array TypeBox, transforma no tipo do item[]
+	T extends { type: "array"; items: infer I }
+		? StaticSchema<I>[]
+		: // Se for qualquer TSchema simples
+		T extends TSchema
+			? Static<T>
+			: // Se for um objeto SchemaDefinition, aplica recursivamente
+			T extends SchemaDefinition
+				? { -readonly [K in keyof T]: StaticSchema<T[K]> }
+				: never;
 
 /**
  * Custom metadata properties that can be added to a schema.
