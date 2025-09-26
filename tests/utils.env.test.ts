@@ -32,13 +32,13 @@ describe('Utils: env.ts', () => {
       expect(result).toEqual({ KEY: 'VALUE WITH SPACES' });
     });
 
-    it('should handle values with special characters like =', () => {
+    it('should handle values containing an equals sign', () => {
       const content = 'KEY=my==value';
       const result = parse(content);
       expect(result).toEqual({ KEY: 'my==value' });
     });
 
-    it('should handle single and double quotes', () => {
+    it('should correctly unquote single and double quoted values', () => {
       const content = `
         SINGLE_QUOTED='hello world'
         DOUBLE_QUOTED="hello world"
@@ -50,19 +50,19 @@ describe('Utils: env.ts', () => {
       });
     });
 
-    it('should trim whitespace from keys and values', () => {
+    it('should trim whitespace from keys and unquoted values', () => {
       const content = '  KEY  =  VALUE  ';
       const result = parse(content);
       expect(result).toEqual({ KEY: 'VALUE' });
     });
 
-    it('should ignore lines without an = sign', () => {
+    it('should ignore lines without an equals sign', () => {
         const content = 'JUST_A_KEY';
         const result = parse(content);
         expect(result).toEqual({});
     });
 
-    it('should handle empty values', () => {
+    it('should handle empty values correctly', () => {
         const content = 'EMPTY_KEY=';
         const result = parse(content);
         expect(result).toEqual({ EMPTY_KEY: '' });
@@ -70,37 +70,37 @@ describe('Utils: env.ts', () => {
   });
 
   describe('updateEnvContent()', () => {
-    it('should update an existing key', () => {
+    it('should update an existing key-value pair', () => {
       const content = 'KEY=VALUE\nOLD_KEY=OLD_VALUE';
       const newContent = updateEnvContent(content, 'KEY', 'NEW_VALUE');
       expect(newContent).toBe('KEY=NEW_VALUE\nOLD_KEY=OLD_VALUE');
     });
 
-    it('should add a new key if it does not exist', () => {
+    it('should add a new key-value pair if it does not exist', () => {
       const content = 'KEY=VALUE';
       const newContent = updateEnvContent(content, 'NEW_KEY', 'NEW_VALUE');
       expect(newContent).toBe('KEY=VALUE\n\nNEW_KEY=NEW_VALUE');
     });
 
-    it('should add a description for a new key', () => {
+    it('should add a description comment for a new key', () => {
       const content = 'KEY=VALUE';
       const newContent = updateEnvContent(content, 'NEW_KEY', 'NEW_VALUE', 'This is a new key');
       expect(newContent).toBe('KEY=VALUE\n\n# This is a new key\nNEW_KEY=NEW_VALUE');
     });
 
-    it('should add a description for an existing key', () => {
+    it('should add a description for an existing key if it does not have one', () => {
       const content = 'KEY=VALUE\nANOTHER_KEY=ANOTHER_VALUE';
       const newContent = updateEnvContent(content, 'ANOTHER_KEY', 'NEW', 'My Key');
       expect(newContent).toBe('KEY=VALUE\n# My Key\nANOTHER_KEY=NEW');
     });
 
-    it('should not duplicate an existing description', () => {
+    it('should not duplicate an existing description comment', () => {
         const content = '# My Key\nKEY=VALUE';
         const newContent = updateEnvContent(content, 'KEY', 'NEW_VALUE', 'My Key');
         expect(newContent).toBe('# My Key\nKEY=NEW_VALUE');
     });
 
-    it('should quote values containing spaces or special characters', () => {
+    it('should quote values that contain spaces or special characters', () => {
         const content = '';
         const newContent = updateEnvContent(content, 'KEY', 'value with spaces');
         expect(newContent).toBe('\nKEY="value with spaces"');

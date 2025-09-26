@@ -8,9 +8,11 @@ import type {
 	inPromise,
 	Paths,
 	RootPaths,
+	SchemaDefinition,
 	StaticSchema,
 } from "./types";
-import { getProperty, setProperty } from "./utils/object";
+import { getProperty, setProperty, deepMerge, isObject } from "./utils/object";
+import { buildTypeBoxSchema, addSmartDefaults, buildDefaultObject } from "./utils/schema";
 
 export class ConfigJSDriver<
 	C extends DriverConfig,
@@ -22,10 +24,9 @@ export class ConfigJSDriver<
 	public config: C;
 	public data: Record<string, any> = {};
 	private compiledSchema?: TObject;
-	private _getEnvKeyForPathOverridden?: (path: string) => string;
 
 	protected store: S = {} as S;
-	private _onLoad?: (this: any, opts: Partial<C>) => inPromise<Async, void>;
+	_onLoad?(schema: SchemaDefinition, opts: Partial<C>): inPromise<Async, any>;
 	private _onGet?: (this: any, key: string) => inPromise<Async, unknown>;
 	private _onSet?: (
 		this: any,
@@ -34,6 +35,10 @@ export class ConfigJSDriver<
 		options?: object,
 	) => inPromise<Async, void>;
 
+	// Utilities passed to drivers
+	protected buildDefaultObject = buildDefaultObject;
+	protected deepMerge = deepMerge;
+
 	constructor(options: ConfigJSDriverOptions<C, S, Async>) {
 		this.identify = options.identify;
 		this.async = options.async as Async;
@@ -41,54 +46,33 @@ export class ConfigJSDriver<
 		this._onLoad = options.onLoad;
 		this._onGet = options.onGet;
 		this._onSet = options.onSet;
-		this._getEnvKeyForPathOverridden = options.getEnvKeyForPath;
 	}
 
-	public load(schema?: TObject, options: Partial<C> = {}): inPromise<Async, void> {
-		if (schema) this.compiledSchema = schema;
-		this.config = {
-			...this.config,
-			...options
-		}
-
-		const afterSaves = () => {
-			this.validate();
+	public load(
+		schema: SchemaDefinition,
+		options: Partial<C> = {},
+	): inPromise<Async, void> {
+		this.compiledSchema = buildTypeBoxSchema(schema);
+        addSmartDefaults(this.compiledSchema);
+		this.config = { ...this.config, ...options };
+		const processResult = (result: any) => {
+			this.data = result;
+			this.validate(this.data);
 		};
 
-		const afterBuild = (config: Record<string, any>) => {
-			this.data = config;
-			if (!this.compiledSchema) return;
-
-			const savesResult = this._applyInitialSaves(this.compiledSchema, "");
-			if (this.async) {
-				return (savesResult as Promise<void>).then(afterSaves);
-			}
-			afterSaves();
-			return savesResult;
-		};
-
-		const afterLoad = () => {
-			if (!this.compiledSchema) {
-				return afterBuild(this.store);
-			}
+		if (this._onLoad) {
+			const loadResult = this._onLoad.call(this, schema, this.config);
 
 			if (this.async) {
-				return this._buildConfigFromRawAsync(this.compiledSchema, "").then(
-					(config) => afterBuild(config),
-				);
+				return (loadResult as Promise<any>).then(processResult) as inPromise<
+					Async,
+					void
+				>;
 			}
-			const config = this.buildConfigFromRaw(this.compiledSchema, "");
-			return afterBuild(config);
-		};
 
-		const loadResult = this._onLoad?.call(this, options ?? ({} as Partial<C>));
-		if (this.async) {
-			return (loadResult as Promise<void>).then(afterLoad) as inPromise<
-				Async,
-				void
-			>;
+			processResult(loadResult);
 		}
-		afterLoad();
+
 		return undefined as inPromise<Async, void>;
 	}
 
@@ -104,8 +88,12 @@ export class ConfigJSDriver<
 
 	public has<T = StaticSchema<any>, P extends Paths<T> = any>(
 		path: P,
-	): boolean {
-		return getProperty(this.data, path as string) !== undefined;
+	): inPromise<Async, boolean> {
+		const hasProp = getProperty(this.data, path as string) !== undefined;
+		if (this.async) {
+			return Promise.resolve(hasProp) as any;
+		}
+		return hasProp as any;
 	}
 
 	public set<T = StaticSchema<any>, P extends Paths<T> = any>(
@@ -114,9 +102,8 @@ export class ConfigJSDriver<
 		options?: { description?: string },
 	): inPromise<Async, void> {
 		setProperty(this.data, path as string, value);
-		const envKey = this._getEnvKeyForPath(path as string);
 		if (this._onSet) {
-			return this._onSet.call(this, envKey, value, options);
+			return this._onSet.call(this, path as string, value, options);
 		}
 		return (this.async ? Promise.resolve() : undefined) as inPromise<
 			Async,
@@ -128,20 +115,18 @@ export class ConfigJSDriver<
 		path: P,
 		partial: Partial<DeepGet<T, P>>,
 	): inPromise<Async, void> {
-		const promises: any[] = [];
-		for (const [key, value] of Object.entries(partial)) {
-			const fullPath = `${path}.${key}`;
-			promises.push(this.set(fullPath as any, value as any));
+		const currentObject = getProperty(this.data, path as string);
+		if (typeof currentObject !== "object" || currentObject === null) {
+			throw new Error(`Cannot insert into non-object at path: ${path}`);
 		}
+		Object.assign(currentObject, partial);
 
-		if (this.async) {
-			return Promise.all(promises).then(() => {}) as inPromise<Async, void>;
-		}
-		return undefined as inPromise<Async, void>;
+		return this.set(path as any, currentObject as any);
 	}
 
 	private validate(config = this.data): void {
 		if (!this.compiledSchema) return;
+
 		Value.Default(this.compiledSchema, config);
 		Value.Convert(this.compiledSchema, config);
 
@@ -153,142 +138,7 @@ export class ConfigJSDriver<
 					.join("\n")}`,
 			);
 		}
-		this._runRefines(this.compiledSchema, config, "");
-	}
 
-	private _runRefines(schema: TObject, config: any, path: string) {
-		for (const key in schema.properties) {
-			const propSchema = schema.properties[key] as any;
-			const currentPath = path ? `${path}.${key}` : key;
-			const value = config?.[key];
-
-			if (value === undefined) continue;
-
-			if (propSchema.type === "object" && propSchema.properties) {
-				this._runRefines(propSchema, value, currentPath);
-			} else if (propSchema.refines) {
-				for (const refine of propSchema.refines) {
-					const result = refine(value);
-					if (result !== true)
-						throw new Error(
-							`[ConfigJS] Validation failed for '${currentPath}': ${
-								typeof result === "string" ? result : "failed refine function"
-							}`,
-						);
-				}
-			}
-		}
-	}
-
-	private _buildConfigFromRawAsync(
-		schema: TObject,
-		prefix: string,
-	): Promise<Record<string, any>> {
-		const result: Record<string, any> = {};
-		const keys = Object.keys(schema.properties);
-		const promises = keys.map((key) => {
-			const propSchema = schema.properties[key] as any;
-			const currentPath = prefix ? `${prefix}.${key}` : key;
-
-			if (propSchema.type === "object" && propSchema.properties) {
-				return this._buildConfigFromRawAsync(propSchema, currentPath).then(
-					(value) => {
-						result[key] = value;
-					},
-				);
-			}
-			const envKey = this._getEnvKeyForPath(currentPath);
-			return (this._onGet?.(envKey) as Promise<unknown>).then((rawValue) => {
-				result[key] =
-					rawValue !== undefined
-						? this.coerceType(rawValue, propSchema)
-						: undefined;
-			});
-		});
-
-		return Promise.all(promises).then(() => result);
-	}
-
-	private buildConfigFromRaw(
-		schema: TObject,
-		prefix: string,
-	): Record<string, any> {
-		const result: Record<string, any> = {};
-		for (const key in schema.properties) {
-			const propSchema = schema.properties[key] as any;
-			const currentPath = prefix ? `${prefix}.${key}` : key;
-			const envKey = this._getEnvKeyForPath(currentPath);
-			const rawValue = this._onGet?.(envKey);
-
-			result[key] =
-				propSchema.type === "object" && propSchema.properties
-					? this.buildConfigFromRaw(propSchema, currentPath)
-					: rawValue !== undefined
-						? this.coerceType(rawValue, propSchema)
-						: undefined;
-		}
-		return result;
-	}
-
-	private coerceType(value: any, schema: TSchema) {
-		if (schema.type === "number") return Number(value);
-		if (schema.type === "boolean")
-			return String(value).toLowerCase() === "true";
-		if (schema.type === "array" && typeof value === "string") {
-			const trimmedValue = value.trim();
-			if (trimmedValue.startsWith("[") && trimmedValue.endsWith("]")) {
-				try {
-					return JSON.parse(trimmedValue);
-				} catch (e) {
-					// Not valid JSON, fall through to let validation handle it.
-				}
-			} else if (trimmedValue.includes(",")) {
-				if (trimmedValue === "") return [];
-				return trimmedValue.split(",").map((s) => s.trim());
-			}
-		}
-		return value;
-	}
-
-	private _applyInitialSaves(
-		schema: TObject,
-		prefix: string,
-	): inPromise<Async, void> {
-		const promises: any[] = [];
-		for (const key in schema.properties) {
-			const propSchema = schema.properties[key] as any;
-			const currentPath = prefix ? `${prefix}.${key}` : key;
-
-			if (propSchema.type === "object" && propSchema.properties) {
-				promises.push(this._applyInitialSaves(propSchema, currentPath));
-			} else if (
-				propSchema.initial_save &&
-				propSchema.default !== undefined &&
-				this.get(currentPath as any) === undefined
-			) {
-				promises.push(this.set(currentPath as any, propSchema.default));
-			}
-		}
-
-		if (this.async) {
-			return Promise.all(promises).then(() => {}) as inPromise<Async, void>;
-		}
-		return undefined as inPromise<Async, void>;
-	}
-
-	private _getEnvKeyForPath(path: string): string {
-		if (this._getEnvKeyForPathOverridden) {
-			return this._getEnvKeyForPathOverridden(path);
-		}
-		if (!this.compiledSchema) return path.replace(/\./g, "_").toUpperCase();
-		const segments = path.split(".");
-		let schema: any = this.compiledSchema;
-
-		for (const segment of segments) {
-			schema = schema?.properties?.[segment];
-			if (!schema) break;
-		}
-
-		return schema?.prop || path.replace(/\./g, "_").toUpperCase();
+		this.data = config;
 	}
 }

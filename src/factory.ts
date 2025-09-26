@@ -116,26 +116,30 @@ const _c = {
 		options?: StringOptions & CustomOptions<TDefault>,
 	) => Type.String({ ...options, format: "uri" }),
 
-	/** Creates an Optional schema. */
-	Optional: <Schema extends TSchema>(schema: Schema) => Type.Optional(schema),
-};
-
-/**
- * A helper object for creating schema definitions with custom metadata.
- * Includes both PascalCase and camelCase versions of helpers.
- */
-export const c = {
-	..._c,
-	string: _c.String,
-	number: _c.Number,
-	boolean: _c.Boolean,
-	object: _c.Object,
-	array: _c.Array,
-	record: _c.Record,
-	enum: _c.Enum,
-	ip: _c.IP,
-	ipv6: _c.IPv6,
-	email: _c.Email,
-	url: _c.URL,
-	optional: _c.Optional,
-};
+	    /** Creates an Any schema. */
+	    Any: () => Type.Any(),
+	
+	    /** Creates an Optional schema. */
+	    Optional: <Schema extends TSchema>(schema: Schema) => Type.Optional(schema),
+	};
+	
+	/**
+	 * A helper object for creating schema definitions with custom metadata.
+	 * Includes both PascalCase and camelCase versions of helpers.
+	 */
+	export const c = {
+	    ..._c,
+	    string: _c.String,
+	    number: _c.Number,
+	    boolean: _c.Boolean,
+	    object: _c.Object,
+	    array: _c.Array,
+	    record: _c.Record,
+	    enum: _c.Enum,
+	    ip: _c.IP,
+	    ipv6: _c.IPv6,
+	    email: _c.Email,
+	    url: _c.URL,
+	    any: _c.Any,
+	    optional: _c.Optional,
+	};

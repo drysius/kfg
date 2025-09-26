@@ -1,9 +1,4 @@
-import {
-	type TObject,
-	type TProperties,
-	type TSchema,
-	Type,
-} from "@sinclair/typebox";
+import type { TObject } from "@sinclair/typebox";
 import type { ConfigJSDriver } from "./driver";
 import type {
 	DeepGet,
@@ -19,16 +14,16 @@ export class ConfigJS<
 	S extends SchemaDefinition,
 > {
 	private driver: D;
-	private compiledSchema: TObject;
+	private schema: S;
 	private loaded = false;
 
 	constructor(driver: D, schema: S) {
 		this.driver = driver;
-		this.compiledSchema = this._buildSchema(schema);
+		this.schema = schema;
 	}
 
 	public load(options?: D["config"]) {
-		const result = this.driver.load(this.compiledSchema, options);
+		const result = this.driver.load(this.schema, options);
 		if (this.driver.async) {
 			return (result as Promise<void>).then(() => {
 				this.loaded = true;
@@ -84,20 +79,5 @@ export class ConfigJS<
 			throw new Error("[ConfigJS] Config not loaded. Call load() first.");
 		}
 		return this.driver.insert(path, partial) as inPromise<D["async"], void>;
-	}
-
-	private _buildSchema(definition: SchemaDefinition): TObject {
-		const properties: TProperties = {};
-		for (const key in definition) {
-			const value = definition[key];
-			const isObject =
-				typeof value === "object" &&
-				value !== null &&
-				!(value as any)[Symbol.for("TypeBox.Kind")];
-			properties[key] = isObject
-				? this._buildSchema(value as SchemaDefinition)
-				: (value as TSchema);
-		}
-		return Type.Object(properties);
 	}
 }

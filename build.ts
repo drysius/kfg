@@ -1,48 +1,29 @@
 import { build, type Options } from 'tsup'
 import { writeFile } from 'fs/promises'
 import { generateDtsBundle } from 'dts-bundle-generator'
-import { dirname, join } from 'path'
-import { mkdir } from 'fs/promises'
-import { existsSync } from 'fs'
+import { join } from 'path'
 import { rm } from 'fs/promises'
 
-if (existsSync('dist')) await rm('dist', { recursive: true })
+// Limpa o diretório de distribuição anterior
+await rm('dist', { recursive: true, force: true })
 
-const sharedConfig: Options = {
+const config: Options = {
   platform: 'node',
   entry: ['src/index.ts'],
   bundle: true,
-  minify: true,
-  minifyIdentifiers: true,
-  minifySyntax: true,
-  minifyWhitespace: true,
   skipNodeModulesBundle: true,
   clean: true,
-  dts: false
-}
-
-await build({
-  format: 'cjs',
-  outDir: 'cjs',
-  tsconfig: './tsconfig.cjs.json',
+  dts: false,
+  format: ['cjs', 'esm'],
+  outDir: 'dist',
   splitting: false,
   shims: true,
-  ...sharedConfig
-})
+  tsconfig: './tsconfig.json'
+}
 
-await build({
-  format: ['esm'],
-  outDir: 'esm',
-  tsconfig: './tsconfig.mjs.json',
-  splitting: true,
-  cjsInterop: false,
-  ...sharedConfig
-})
+await build(config)
 
-await writeFile('cjs/package.json', JSON.stringify({ type: 'commonjs' }, null, 2))
-await writeFile('esm/package.json', JSON.stringify({ type: 'module' }, null, 2))
-
-const dtsPath = join(process.cwd(), 'index.d.ts')
+const dtsPath = join(process.cwd(), 'dist/index.d.ts')
 const dtsCode = generateDtsBundle([{
   filePath: join(process.cwd(), 'src/index.ts'),
   output: {
@@ -53,5 +34,4 @@ const dtsCode = generateDtsBundle([{
   }
 }])
 
-await mkdir(dirname(dtsPath), { recursive: true })
-await writeFile(dtsPath, dtsCode, { encoding: 'utf-8' })
+await writeFile(dtsPath, dtsCode[0], { encoding: 'utf-8' })

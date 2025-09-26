@@ -23,3 +23,26 @@ export function setProperty<T extends Record<string, any>>(
 	}
 	target[lastKey] = value;
 }
+
+export function isObject(item: any): item is Record<string, any> {
+  return (item && typeof item === 'object' && !Array.isArray(item));
+}
+
+export function deepMerge<T extends object, U extends object>(target: T, source: U): T & U {
+    const output = { ...target } as T & U;
+
+    if (isObject(target) && isObject(source)) {
+        Object.keys(source).forEach(key => {
+            const sourceValue = source[key as keyof U];
+            const targetValue = target[key as keyof T];
+
+            if (isObject(sourceValue) && isObject(targetValue)) {
+                (output as any)[key] = deepMerge(targetValue as object, sourceValue as object);
+            } else {
+                (output as any)[key] = sourceValue;
+            }
+        });
+    }
+
+    return output;
+}

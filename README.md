@@ -1,19 +1,22 @@
-# ConfigJS - Type-Safe Environment Configuration Manager
+# ConfigJS - Simple, Type-Safe Configuration Management
 
-## Overview
+[![npm version](https://badge.fury.io/js/%40caeljs%2Fconfig.svg)](https://badge.fury.io/js/%40caeljs%2Fconfig)
 
-ConfigJS is a robust, type-safe configuration management system for Node.js applications. It provides a structured way to define, validate, and access environment variables and other configuration sources with full TypeScript support.
+ConfigJS is a robust and 100% type-safe configuration management system for Node.js and Bun applications. It provides a structured way to define, validate, and access environment variables and other configuration sources with the power of TypeScript.
 
-## Features
+- ✅ **Fully Typed**: Autocomplete and type safety for all your configurations.
+- ✅ **Flexible Drivers**: Load configurations from `.env` files, JSON, or create your own driver.
+- ✅ **Built-in Validation**: Define rules and formats (email, url, etc.) directly in the schema.
+- ✅ **Smart Defaults**: Define defaults that are applied automatically.
+- ✅ **Nested Structures**: Organize your configurations logically.
 
-- **Type-safe configuration** with TypeScript inference
-- **Multiple drivers** (env, file, etc.)
-- **Synchronous and asynchronous** support
-- **Validation and transformation** of configuration values
-- **Nested configuration** structures
-- **Caching** of resolved values
-- **CRUD operations** for configuration values
-- **Schema definition** for all configuration keys
+--- 
+
+## 📖 Documentation
+
+- **[Full Usage Guide](./docs/usage.md)**: Learn how to install and use ConfigJS.
+- **[Schema Definitions](./docs/schemas.md)**: See all available validators and options.
+- **[Creating Drivers](./docs/drivers.md)**: Learn how to load configurations from any source.
 
 ## Installation
 
@@ -25,186 +28,49 @@ yarn add @caeljs/config
 bun add @caeljs/config
 ```
 
-## Basic Usage
+## Quick Example
 
-### 1. Define your configuration schema
+**1. Define your schema (`schema.ts`):**
 
 ```typescript
-import { c, ConfigJS, ConfigJSDriver } from "@caeljs/config";
+import { c } from "@caeljs/config";
 
-const Config = new ConfigJS(envDriver, {
-  db: {
-    host: c.string().prop("DB_HOST"),
-    port: c.number().prop("DB_PORT"),
-    username: c.string().prop("DB_USER"),
-    password: c.string().secret().prop("DB_PASS"),
+export const AppSchema = {
+  server: {
+    host: c.string({ default: "0.0.0.0" }),
+    port: c.number({ default: 3000 }),
   },
-  environment: c.enum(["development", "production", "staging"]).prop("NODE_ENV"),
-  featureFlags: {
-    newUI: c.boolean().default(false).prop("NEW_UI_ENABLED"),
-  }
-});
+  database: {
+    url: c.string({ prop: "DATABASE_URL" }), // Reads from the DATABASE_URL environment variable
+  },
+};
 ```
 
-### 2. Load configuration
+**2. Create and load your instance (`config.ts`):**
 
-```typescript
-// Load
-Config.load();
-
-// Or load with additional options
-Config.load({
-  processEnv: false,
-});
-```
-
-### 3. Use configuration values
-
-```typescript
-
-// Get values
-const dbHost = Config.get("db.host");
-const isProduction = Config.get("environment") === "production";
-
-// Set values
-Config.set("featureFlags.newUI", true);
-
-// Delete values
-Config.del("db.password");
-```
-
-## API Reference
-
-Main configuration manager class.
-
-**Constructor:**
 ```typescript
 import { ConfigJS } from "@caeljs/config";
+import { envDriver } from "@caeljs/config/drivers";
+import { AppSchema } from "./schema";
 
-new ConfigJS(driver: AnyConfigDriver, shapes: Shapes)
+const config = new ConfigJS(envDriver, AppSchema);
+config.load(); // Loads values from .env and process.env
+
+export default config;
 ```
 
-**Properties:**
-- `async`: Boolean indicating if driver operates asynchronously
-- `cached`: Object with cached values of all configurations
-- `shapes`: Original shape definitions
-- `driver`: The configuration driver instance
-- `config`: Driver-specific configuration
-
-**Methods:**
-- `getSchema(key)`: Get the shape definition for a key
-- `get(key)`: Get a configuration value
-- `set(key, value)`: Set a configuration value
-- `del(key)`: Delete a configuration value
-- `conf(key)`: Get configuration metadata
-- `keys()`: Get all configuration keys
-- `has(...keys)`: Check if keys exist
-- `load(opts)`: Load configuration
-- `save()`: Save current configuration
-
-### Shape Types
-
-All shape types extend `BaseShape` and provide validation and transformation:
-
-- `StringShape`: String values
-- `NumberShape`: Numeric values
-- `BooleanShape`: Boolean values
-- `EnumShape`: Enumeration of allowed values
-- `ObjectShape`: Nested objects
-- `ArrayShape`: Arrays of values
-- `RecordShape`: Dictionary types
-
-Each shape provides methods:
-- `.prop(envVar)`: Map to environment variable
-- `.default(value)`: Set default value
-- `.secret()`: Mark as sensitive value
-- `.refire(fn)`: Add custom validation
-- `.transform(fn)`: Add transformation
-- `.coerce()`: Enable type coercion
-- And another props, based on type 
-
-### Drivers
-
-Built-in drivers:
-- `envDriver`: Environment variables driver
-
-Driver interface:
-```typescript
-interface AnyConfigDriver<IsAsync extends boolean, ConfigType> {
-  async: IsAsync;
-  config: ConfigType;
-  get(shape: BaseShape<any>): IsAsync extends true ? Promise<any> : any;
-  set(shape: BaseShape<any>, value: any): IsAsync extends true ? Promise<void> : void;
-  del(shape: BaseShape<any>): IsAsync extends true ? Promise<void> : void;
-  has(...shapes: BaseShape<any>[]): IsAsync extends true ? Promise<boolean> : boolean;
-  load(shapes: BaseShape<any>[]): IsAsync extends true ? Promise<void> : void;
-  save(shapes: BaseShape<any>[]): IsAsync extends true ? Promise<void> : void;
-}
-```
-
-## Advanced Usage
-
-### Custom Validation
+**3. Use it anywhere (`index.ts`):**
 
 ```typescript
-const config = new ConfigJS(envDriver, {
-  port: c.number()
-    .prop("APP_PORT")
-    .refine(val => (val > 1024), "Port must be > 1024")
-    .default(3000),
-});
-```
+import config from "./config";
 
-### Creating Custom Drivers
+const port = config.get("server.port"); // Inferred as `number`
+const dbUrl = config.get("database.url"); // Inferred as `string`
 
-```typescript
-import { c, ConfigJS, ConfigJSDriver } from "@caeljs/config";
+console.log(`Server running on port ${port}`);
 
-const fileDriver = new ConfigJSDriver({
-  async: true,
-  config: { filePath: './config.json' },
-  async get(shape) {
-    const config = await readJsonFile(this.config.filePath);
-    return config[shape._prop];
-  },
-  // Implement other required methods...
-});
-
-const fileConfig = new ConfigJS(fileDriver, {
-  settings: c.object({
-    logLevel: c.string().prop("logLevel"),
-  }),
-});
-```
-
-## Best Practices
-
-1. **Centralize configuration**: Define all configuration in one place
-2. **Use descriptive names**: For both config keys and env vars
-3. **Validate early**: Validate configuration at application startup
-4. **Use secrets marking**: For sensitive values
-5. **Provide defaults**: Wherever possible
-6. **Document schema**: Add comments explaining each configuration
-
-## Type Safety
-
-ConfigJS provides complete TypeScript support:
-
-```typescript
-import { c, ConfigJS } from "@caeljs/config";
-
-const config = new ConfigJS(envDriver, {
-  server: {
-    port: c.number().prop("PORT"),
-    ssl: c.boolean().prop("SSL_ENABLED"),
-  },
-});
-
-// Type is inferred as number
-const port = config.get("server.port");
-
-// Type error - port is a number
-config.set("server.port", "8080"); // Error: Type 'string' is not assignable to type 'number'
+// Type Error! TypeScript prevents incorrect assignments.
+// config.set("server.port", "not-a-number");
 ```
 
 ## License

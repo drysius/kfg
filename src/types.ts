@@ -1,4 +1,5 @@
-import type { Static, TSchema } from "@sinclair/typebox";
+import type { Static, TObject, TSchema } from "@sinclair/typebox";
+export type { TSchema, TObject };
 import type { ConfigJSDriver } from "./driver";
 
 // --- Driver Related Types ---
@@ -46,7 +47,11 @@ export type DriverOnLoad<
 	C extends DriverConfig,
 	S extends DriverStore,
 	A extends boolean,
-> = (this: ConfigJSDriver<C, S, A>, opts: Partial<C>) => inPromise<A, void>;
+> = (
+	this: ConfigJSDriver<C, S, A>,
+	schema: SchemaDefinition,
+	opts: Partial<C>,
+) => inPromise<A, any>;
 export type DriverOnGet<
 	C extends DriverConfig,
 	S extends DriverStore,
