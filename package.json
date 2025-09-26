@@ -55,8 +55,7 @@
     "build": "bun run build.ts",
     "test": "bun test",
     "check": "biome check src/** --write",
-    "prebuild": "tsc --project tsconfig.test.json",
-    "prepublishOnly": "bun run build"
+    "prebuild": "tsc --project tsconfig.test.json"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.2.4",
