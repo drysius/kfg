@@ -54,7 +54,7 @@
   "scripts": {
     "build": "bun run build.ts",
     "test": "bun test",
-    "check": "biome check src/** --write",
+    "check": "biome check --write",
     "prebuild": "tsc --project tsconfig.test.json"
   },
   "devDependencies": {

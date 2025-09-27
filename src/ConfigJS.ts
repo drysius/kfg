@@ -1,6 +1,4 @@
-import type { TObject } from "@sinclair/typebox";
 import type { ConfigJSDriver } from "./driver";
-import { makeSchemaOptional } from "./utils/schema";
 import type {
 	DeepGet,
 	inPromise,
@@ -9,6 +7,7 @@ import type {
 	SchemaDefinition,
 	StaticSchema,
 } from "./types";
+import { makeSchemaOptional } from "./utils/schema";
 
 export class ConfigJS<
 	D extends ConfigJSDriver<any, any, any>,

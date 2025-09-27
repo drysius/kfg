@@ -28,9 +28,7 @@ function getEnumValues<T extends readonly (string | number)[] | object>(
 			(v) => typeof v === "number",
 		) as number[];
 	}
-	return Object.values(values).filter(
-		(v) => typeof v === "string",
-	) as string[];
+	return Object.values(values).filter((v) => typeof v === "string") as string[];
 }
 
 const _c = {
@@ -46,7 +44,7 @@ const _c = {
 
 	/** Creates a Boolean schema. */
 	Boolean: <TDefault extends boolean>(
-		options?: Omit<SchemaOptions, 'default'> & CustomOptions<TDefault>,
+		options?: Omit<SchemaOptions, "default"> & CustomOptions<TDefault>,
 	) => Type.Boolean(options),
 
 	/** Creates an Object schema. */
@@ -72,7 +70,7 @@ const _c = {
 	>(
 		key: K,
 		value: V,
-		options?: Omit<SchemaOptions, 'default'> & CustomOptions<TDefault>,
+		options?: Omit<SchemaOptions, "default"> & CustomOptions<TDefault>,
 	) => Type.Record(key, value, options),
 
 	/** Creates a Union of Literals from a string array, const array, or a TypeScript enum. */
@@ -85,7 +83,7 @@ const _c = {
 				: never,
 	>(
 		values: T,
-		options?: CustomOptions<TValues> & Omit<SchemaOptions, 'default'>,
+		options?: CustomOptions<TValues> & Omit<SchemaOptions, "default">,
 		//@ts-expect-error ignore
 	): TUnion<TLiteral<TValues>[]> => {
 		const enumValues = getEnumValues(values);
@@ -116,30 +114,30 @@ const _c = {
 		options?: StringOptions & CustomOptions<TDefault>,
 	) => Type.String({ ...options, format: "uri" }),
 
-	    /** Creates an Any schema. */
-	    Any: () => Type.Any(),
-	
-	    /** Creates an Optional schema. */
-	    Optional: <Schema extends TSchema>(schema: Schema) => Type.Optional(schema),
-	};
-	
-	/**
-	 * A helper object for creating schema definitions with custom metadata.
-	 * Includes both PascalCase and camelCase versions of helpers.
-	 */
-	export const c = {
-	    ..._c,
-	    string: _c.String,
-	    number: _c.Number,
-	    boolean: _c.Boolean,
-	    object: _c.Object,
-	    array: _c.Array,
-	    record: _c.Record,
-	    enum: _c.Enum,
-	    ip: _c.IP,
-	    ipv6: _c.IPv6,
-	    email: _c.Email,
-	    url: _c.URL,
-	    any: _c.Any,
-	    optional: _c.Optional,
-	};
+	/** Creates an Any schema. */
+	Any: () => Type.Any(),
+
+	/** Creates an Optional schema. */
+	Optional: <Schema extends TSchema>(schema: Schema) => Type.Optional(schema),
+};
+
+/**
+ * A helper object for creating schema definitions with custom metadata.
+ * Includes both PascalCase and camelCase versions of helpers.
+ */
+export const c = {
+	..._c,
+	string: _c.String,
+	number: _c.Number,
+	boolean: _c.Boolean,
+	object: _c.Object,
+	array: _c.Array,
+	record: _c.Record,
+	enum: _c.Enum,
+	ip: _c.IP,
+	ipv6: _c.IPv6,
+	email: _c.Email,
+	url: _c.URL,
+	any: _c.Any,
+	optional: _c.Optional,
+};

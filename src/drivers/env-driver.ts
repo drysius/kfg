@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { ConfigJSDriver } from "../driver";
-import { parse, updateEnvContent } from "../utils/env";
 import type { SchemaDefinition, TSchema } from "../types";
+import { parse, updateEnvContent } from "../utils/env";
 
 function getFilePath(config: { path?: string }): string {
 	return path.resolve(process.cwd(), config.path || ".env");
@@ -20,7 +20,9 @@ function coerceType(value: any, schema: TSchema) {
 		if (trimmedValue.startsWith("[") && trimmedValue.endsWith("]")) {
 			try {
 				return JSON.parse(trimmedValue);
-			} catch { /* fallthrough */ }
+			} catch {
+				/* fallthrough */
+			}
 		}
 	}
 
@@ -71,7 +73,7 @@ export const envDriver = new ConfigJSDriver({
 	identify: "env-driver",
 	async: false,
 	config: { path: ".env" },
-	onLoad(schema, opts) {
+	onLoad(schema, _opts) {
 		const filePath = getFilePath(this.config);
 		const fileContent = fs.existsSync(filePath)
 			? fs.readFileSync(filePath, "utf-8")
@@ -85,7 +87,7 @@ export const envDriver = new ConfigJSDriver({
 		const allEnvValues = { ...processEnv, ...envFileValues };
 
 		const envData = traverseSchema(schema, allEnvValues);
-        const defaultData = this.buildDefaultObject(schema);
+		const defaultData = this.buildDefaultObject(schema);
 
 		this.store = this.deepMerge(defaultData, envData);
 		return this.store;

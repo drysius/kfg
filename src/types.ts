@@ -1,5 +1,6 @@
 import type { Static, TObject, TSchema } from "@sinclair/typebox";
 export type { TSchema, TObject };
+
 import type { ConfigJSDriver } from "./driver";
 
 // --- Driver Related Types ---
@@ -101,19 +102,19 @@ export type StaticSchema<T> =
 	T extends { type: "array"; items: infer I }
 		? StaticSchema<I>[]
 		: // Se for qualquer TSchema simples
-		T extends TSchema
+			T extends TSchema
 			? Static<T>
 			: // Se for um objeto SchemaDefinition, aplica recursivamente
-			T extends SchemaDefinition
+				T extends SchemaDefinition
 				? { -readonly [K in keyof T]: StaticSchema<T[K]> }
 				: never;
 
 /**
  * Custom metadata properties that can be added to a schema.
  */
-export interface CustomOptions<Default extends any = any> {
+export interface CustomOptions<Default = any> {
 	description?: string;
-	default?:Default;
+	default?: Default;
 	important?: boolean;
 	initial_save?: boolean;
 	prop?: string;

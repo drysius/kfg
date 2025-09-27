@@ -1,4 +1,4 @@
-import type { TObject, TSchema } from "@sinclair/typebox";
+import type { TObject } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import type {
 	ConfigJSDriverOptions,
@@ -11,8 +11,12 @@ import type {
 	SchemaDefinition,
 	StaticSchema,
 } from "./types";
-import { getProperty, setProperty, deepMerge, isObject } from "./utils/object";
-import { buildTypeBoxSchema, addSmartDefaults, buildDefaultObject } from "./utils/schema";
+import { deepMerge, getProperty, setProperty } from "./utils/object";
+import {
+	addSmartDefaults,
+	buildDefaultObject,
+	buildTypeBoxSchema,
+} from "./utils/schema";
 
 export class ConfigJSDriver<
 	C extends DriverConfig,
@@ -23,11 +27,11 @@ export class ConfigJSDriver<
 	public async = undefined as unknown as Async;
 	public config: C;
 	public data: Record<string, any> = {};
+	public comments?: Record<string, string>;
 	private compiledSchema?: TObject;
 
 	protected store: S = {} as S;
 	_onLoad?(schema: SchemaDefinition, opts: Partial<C>): inPromise<Async, any>;
-	private _onGet?: (this: any, key: string) => inPromise<Async, unknown>;
 	private _onSet?: (
 		this: any,
 		key: string,
@@ -53,7 +57,7 @@ export class ConfigJSDriver<
 		options: Partial<C> = {},
 	): inPromise<Async, void> {
 		this.compiledSchema = buildTypeBoxSchema(schema);
-        addSmartDefaults(this.compiledSchema);
+		addSmartDefaults(this.compiledSchema);
 		this.config = { ...this.config, ...options };
 		const processResult = (result: any) => {
 			this.data = result;

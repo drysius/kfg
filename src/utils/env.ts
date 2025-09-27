@@ -66,7 +66,7 @@ export function updateEnvContent(
 	} else {
 		const stringValue = String(value);
 		formattedValue = /[\s"'#]/.test(stringValue)
-			? `"${stringValue.replace(/"/g, '\"').replace(/\n/g, "\\n")}"`
+			? `"${stringValue.replace(/"/g, '"').replace(/\n/g, "\\n")}"`
 			: stringValue;
 	}
 

@@ -25,44 +25,56 @@ export function setProperty<T extends Record<string, any>>(
 }
 
 export function isObject(item: any): item is Record<string, any> {
-  return item !== null && typeof item === 'object' && !Array.isArray(item);
+	return item !== null && typeof item === "object" && !Array.isArray(item);
 }
 
-export function deepMerge<T extends object, U extends object>(target: T, source: U): T & U {
-    const output = { ...target } as T & U;
+export function deepMerge<T extends object, U extends object>(
+	target: T,
+	source: U,
+): T & U {
+	const output = { ...target } as T & U;
 
-    if (isObject(target) && isObject(source)) {
-        Object.keys(source).forEach(key => {
-            const sourceValue = source[key as keyof U];
-            const targetValue = target[key as keyof T];
+	if (isObject(target) && isObject(source)) {
+		Object.keys(source).forEach((key) => {
+			const sourceValue = source[key as keyof U];
+			const targetValue = target[key as keyof T];
 
-            if (isObject(sourceValue) && isObject(targetValue)) {
-                (output as any)[key] = deepMerge(targetValue as object, sourceValue as object);
-            } else {
-                (output as any)[key] = sourceValue;
-            }
-        });
-    }
+			if (isObject(sourceValue) && isObject(targetValue)) {
+				(output as any)[key] = deepMerge(
+					targetValue as object,
+					sourceValue as object,
+				);
+			} else {
+				(output as any)[key] = sourceValue;
+			}
+		});
+	}
 
-    return output;
+	return output;
 }
 
-export function flattenObject(obj: Record<string, any>, prefix = ''): Record<string, any> {
-    return Object.keys(obj).reduce((acc, k) => {
-        const pre = prefix.length ? `${prefix}.` : '';
-        if (isObject(obj[k])) {
-            Object.assign(acc, flattenObject(obj[k], pre + k));
-        } else {
-            acc[pre + k] = obj[k];
-        }
-        return acc;
-    }, {} as Record<string, any>);
+export function flattenObject(
+	obj: Record<string, any>,
+	prefix = "",
+): Record<string, any> {
+	return Object.keys(obj).reduce(
+		(acc, k) => {
+			const pre = prefix.length ? `${prefix}.` : "";
+			if (isObject(obj[k])) {
+				Object.assign(acc, flattenObject(obj[k], pre + k));
+			} else {
+				acc[pre + k] = obj[k];
+			}
+			return acc;
+		},
+		{} as Record<string, any>,
+	);
 }
 
 export function unflattenObject(obj: Record<string, any>): Record<string, any> {
-    const result = {};
-    for (const key in obj) {
-        setProperty(result, key, obj[key]);
-    }
-    return result;
+	const result = {};
+	for (const key in obj) {
+		setProperty(result, key, obj[key]);
+	}
+	return result;
 }
