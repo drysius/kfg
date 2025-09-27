@@ -87,13 +87,15 @@ export class ConfigJSDriver<
 	}
 
 	public has<T = StaticSchema<any>, P extends Paths<T> = any>(
-		path: P,
+		...paths: P[]
 	): inPromise<Async, boolean> {
-		const hasProp = getProperty(this.data, path as string) !== undefined;
+		const hasAllProps = paths.every(
+			(path) => getProperty(this.data, path as string) !== undefined,
+		);
 		if (this.async) {
-			return Promise.resolve(hasProp) as any;
+			return Promise.resolve(hasAllProps) as any;
 		}
-		return hasProp as any;
+		return hasAllProps as any;
 	}
 
 	public set<T = StaticSchema<any>, P extends Paths<T> = any>(

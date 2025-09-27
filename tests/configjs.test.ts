@@ -121,6 +121,30 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 		expect(fileContent).toContain("APP_PORT=9999");
 	});
 
+	it("should check for single or multiple properties with has()", () => {
+		fs.writeFileSync(TEST_ENV_PATH, "APP_PORT=8080");
+		const schema = {
+			app: {
+				port: c.number(),
+				name: c.string({ default: "MyApp" }),
+				host: c.optional(c.string()), // No value provided
+			},
+		};
+
+		const config = new ConfigJS(envDriver, schema);
+		config.load({ path: TEST_ENV_PATH });
+
+		// Test single properties
+		expect(config.has("app.port")).toBe(true); // From .env
+		expect(config.has("app.name")).toBe(true); // From default
+		expect(config.has("app.host")).toBe(false); // Not defined
+
+		// Test multiple properties
+		expect(config.has("app.port", "app.name")).toBe(true); // Both exist
+		expect(config.has("app.port", "app.host")).toBe(false); // One exists, one doesn't
+		expect(config.has("app.name", "app.port", "app.host")).toBe(false); // One doesn't exist
+	});
+
     it('should throw an error if get() is called before load()', () => {
         const config = new ConfigJS(envDriver, {});
         expect(() => config.get('any.path')).toThrow('[ConfigJS] Config not loaded. Call load() first.');

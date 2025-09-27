@@ -43,11 +43,11 @@ export class ConfigJS<
 		>;
 	}
 
-	public has<P extends Paths<StaticSchema<S>>>(path: P) {
+	public has<P extends Paths<StaticSchema<S>>>(...paths: P[]) {
 		if (!this.loaded) {
 			throw new Error("[ConfigJS] Config not loaded. Call load() first.");
 		}
-		return this.driver.has(path) as inPromise<D["async"], boolean>;
+		return this.driver.has(...paths) as inPromise<D["async"], boolean>;
 	}
 
 	public root<P extends RootPaths<StaticSchema<S>>>(path: P) {
