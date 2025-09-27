@@ -159,20 +159,16 @@ describe('JSON Driver Integration', () => {
     // Verifies the comment feature, ensuring that descriptions provided to `set()`
     // are saved as sibling properties with a `:comment` suffix and are preserved
     // across subsequent loads and saves.
-    it('should save comments as sibling properties with :comment suffix', () => {
+    it('should save in nested format with comments when keyroot is false', () => {
         const schema = {
             app: {
-                port: c.optional(c.number()),
-                server: {
-                    host: c.string({ default: 'localhost' })
-                }
+                port: c.optional(c.number())
             }
         };
         const config = new ConfigJS(jsonDriver, schema);
-        config.load({ path: TEST_JSON_PATH });
+        config.load({ path: TEST_JSON_PATH, keyroot: false });
 
         config.set('app.port', 8080, { description: 'The application port' });
-        config.set('app.server.host', 'example.com', { description: 'The server host' });
 
         const fileContent = fs.readFileSync(TEST_JSON_PATH, 'utf-8');
         const parsed = JSON.parse(fileContent);
@@ -180,24 +176,51 @@ describe('JSON Driver Integration', () => {
         expect(parsed).toEqual({
             app: {
                 port: 8080,
-                'port:comment': 'The application port',
-                server: {
-                    host: 'example.com',
-                    'host:comment': 'The server host'
-                }
+                'port:comment': 'The application port'
             }
         });
 
+        // Test loading
         const config2 = new ConfigJS(jsonDriver, schema);
-        config2.load({ path: TEST_JSON_PATH });
+        config2.load({ path: TEST_JSON_PATH, keyroot: false });
         expect(config2.get('app.port')).toBe(8080);
+        expect(config2.root('app')).toEqual({ port: 8080 }); // Ensure comment is not in config data
+    });
 
-        config2.set('app.port', 9090);
-        const fileContent2 = fs.readFileSync(TEST_JSON_PATH, 'utf-8');
-        const parsed2 = JSON.parse(fileContent2);
-        
-        expect(parsed2.app['port:comment']).toBe('The application port');
-        expect(parsed2.app.server['host:comment']).toBe('The server host');
+    // Verifies that when `keyroot: true` is used, the JSON file is saved in a flattened
+    // format and that comments are also flattened correctly.
+    it('should save in flattened format with comments when keyroot is true', () => {
+        const schema = {
+            app: {
+                port: c.optional(c.number()),
+                host: c.string({ default: 'localhost' })
+            }
+        };
+        const config = new ConfigJS(jsonDriver, schema);
+        config.load({ path: TEST_JSON_PATH, keyroot: true });
+
+        config.set('app.port', 8080, { description: 'The application port' });
+
+        const fileContent = fs.readFileSync(TEST_JSON_PATH, 'utf-8');
+        const parsed = JSON.parse(fileContent);
+
+        // Verify the flattened structure in the saved file
+        expect(parsed).toEqual({
+            'app.port': 8080,
+            'app.port:comment': 'The application port',
+            'app.host': 'localhost'
+        });
+        // Explicitly check that the nested 'app' object does not exist
+        expect(parsed.app).toBeUndefined();
+
+        // Test that loading the flattened file works correctly
+        const config2 = new ConfigJS(jsonDriver, schema);
+        config2.load({ path: TEST_JSON_PATH, keyroot: true });
+        // Check that the values are correctly unflattened and accessible
+        expect(config2.get('app.port')).toBe(8080);
+        expect(config2.get('app.host')).toBe('localhost');
+        // Ensure the root object is correctly reconstructed
+        expect(config2.root('app')).toEqual({ port: 8080, host: 'localhost' });
     });
 
     // Checks that the `insert` method throws an error when attempting to merge

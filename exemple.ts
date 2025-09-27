@@ -6,6 +6,7 @@ enum AppTest {
 const config = new ConfigJS(envDriver, {
     app: {
         port: c.number({
+            prop:"DEFAILT",
             default: 4555
         }),
     },
@@ -32,7 +33,7 @@ const config = new ConfigJS(envDriver, {
 });
 
 config.load();
-console.log(config.get('num_one'))
+console.log(config.get('app.port'))
 console.log(config.get('test'))
 config.set('owners',["test", 'aaaaa', '123'])
 config.set('app.port', 3000);

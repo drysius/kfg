@@ -95,3 +95,44 @@ config.load({ path: 'another-config.yaml' });
 
 const myValue = config.get("some.property");
 ```
+
+## Built-in Drivers
+
+ConfigJS comes with two pre-built drivers for common use cases: `jsonDriver` and `envDriver`.
+
+### `jsonDriver`
+
+The `jsonDriver` loads and saves configuration from a JSON file.
+
+**Default Behavior**
+
+By default, the driver maintains the nested structure of your schema in the JSON file. If you provide a description when using `config.set()`, it will be stored as a sibling property with a `:comment` suffix.
+
+*Example `config.json` output:*
+```json
+{
+  "app": {
+    "port:comment": "The application port",
+    "port": 3000
+  }
+}
+```
+
+**`keyroot` Option**
+
+The `jsonDriver` has a special configuration option called `keyroot`. When set to `true`, the driver will "flatten" the JSON structure, using dot notation for keys. This can make the configuration file easier to read and edit by hand for complex, deeply nested schemas.
+
+To enable it, pass `{ keyroot: true }` to the `load()` method:
+```typescript
+config.load({ path: 'my-config.json', keyroot: true });
+```
+
+When `keyroot` is enabled, both the configuration keys and their corresponding comments are flattened.
+
+*Example `config.json` output with `keyroot: true`:*
+```json
+{
+  "app.port:comment": "The application port",
+  "app.port": 3000
+}
+```
