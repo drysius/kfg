@@ -1,5 +1,6 @@
 import type { TObject } from "@sinclair/typebox";
 import type { ConfigJSDriver } from "./driver";
+import { makeSchemaOptional } from "./utils/schema";
 import type {
 	DeepGet,
 	inPromise,
@@ -22,8 +23,25 @@ export class ConfigJS<
 		this.schema = schema;
 	}
 
-	public load(options?: D["config"]) {
-		const result = this.driver.load(this.schema, options);
+	/**
+	 * Loads the configuration.
+	 * @param options - The loading options.
+	 */
+	public load(
+		options?: D["config"] & {
+			/**
+			 * If true, all schema properties will be treated as optional during validation,
+			 * except for those marked as `important: true`. This is useful for loading a
+			 * partial configuration without triggering validation errors for missing values.
+			 */
+			only_importants?: boolean;
+		},
+	) {
+		let schemaToLoad = this.schema;
+		if (options?.only_importants) {
+			schemaToLoad = makeSchemaOptional(this.schema) as S;
+		}
+		const result = this.driver.load(schemaToLoad, options);
 		if (this.driver.async) {
 			return (result as Promise<void>).then(() => {
 				this.loaded = true;

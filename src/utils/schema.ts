@@ -67,3 +67,26 @@ export function buildDefaultObject(definition: SchemaDefinition): Record<string,
     }
     return obj;
 }
+
+export function makeSchemaOptional(definition: SchemaDefinition): SchemaDefinition {
+    const newDefinition: Record<string, any> = {};
+
+    for (const key in definition) {
+        const value = (definition as any)[key];
+
+        if (value && value[Symbol.for('TypeBox.Kind')]) {
+            const schema = value as TSchema & { important?: boolean, modifier?: string };
+
+            if (schema.important || schema.modifier === 'Optional') {
+                newDefinition[key] = schema;
+            } else {
+                newDefinition[key] = Type.Optional(schema);
+            }
+        } else if (typeof value === 'object' && value !== null) {
+            newDefinition[key] = makeSchemaOptional(value);
+        } else {
+             newDefinition[key] = value;
+        }
+    }
+    return newDefinition;
+}

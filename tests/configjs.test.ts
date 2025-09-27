@@ -147,6 +147,40 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 
     it('should throw an error if get() is called before load()', () => {
         const config = new ConfigJS(envDriver, {});
-        expect(() => config.get('any.path')).toThrow('[ConfigJS] Config not loaded. Call load() first.');
+        expect(() => config.get('any.path' as never)).toThrow('[ConfigJS] Config not loaded. Call load() first.');
     });
+
+	it("should skip non-important validations when only_importants is true", () => {
+		const schema = {
+			app: {
+				name: c.string(), // required, but not important
+				version: c.string({ important: true }), // required and important
+			},
+			db: {
+				host: c.string({ default: "localhost" }),
+			}
+		};
+
+		// This should fail because app.name and app.version are missing
+		const configFail = new ConfigJS(envDriver, schema);
+		expect(() => configFail.load({ path: TEST_ENV_PATH })).toThrow();
+
+		// Write only the important value
+		fs.writeFileSync(TEST_ENV_PATH, 'APP_VERSION=1.0.0');
+
+		// This should also fail because app.name is still missing
+		const configFail2 = new ConfigJS(envDriver, schema);
+		expect(() => configFail2.load({ path: TEST_ENV_PATH })).toThrow();
+
+		// This should succeed, as app.name is now optional
+		const configSuccess = new ConfigJS(envDriver, schema);
+		configSuccess.load({ path: TEST_ENV_PATH, only_importants: true });
+		expect(configSuccess.get('app.version')).toBe('1.0.0');
+		expect(configSuccess.has('app.name')).toBe(false);
+
+		// This should fail because the important app.version is missing
+		if (fs.existsSync(TEST_ENV_PATH)) fs.unlinkSync(TEST_ENV_PATH);
+		const configFailImportant = new ConfigJS(envDriver, schema);
+		expect(() => configFailImportant.load({ path: TEST_ENV_PATH, only_importants: true })).toThrow();
+	});
 });
