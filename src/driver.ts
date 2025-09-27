@@ -48,7 +48,6 @@ export class ConfigJSDriver<
 		this.async = options.async as Async;
 		this.config = options.config || ({} as C);
 		this._onLoad = options.onLoad;
-		this._onGet = options.onGet;
 		this._onSet = options.onSet;
 	}
 

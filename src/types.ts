@@ -53,11 +53,6 @@ export type DriverOnLoad<
 	schema: SchemaDefinition,
 	opts: Partial<C>,
 ) => inPromise<A, any>;
-export type DriverOnGet<
-	C extends DriverConfig,
-	S extends DriverStore,
-	A extends boolean,
-> = (this: ConfigJSDriver<C, S, A>, key: string) => inPromise<A, unknown>;
 export type DriverOnSet<
 	C extends DriverConfig,
 	S extends DriverStore,
@@ -79,7 +74,6 @@ export interface ConfigJSDriverOptions<
 	config: C;
 	getEnvKeyForPath?: (path: string) => string;
 	onLoad?: DriverOnLoad<C, S, A>;
-	onGet?: DriverOnGet<C, S, A>;
 	onSet?: DriverOnSet<C, S, A>;
 }
 
