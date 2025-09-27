@@ -24,6 +24,8 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 		}
 	});
 
+	// Verifies that the driver can correctly map an environment variable
+	// to a nested property within the configuration schema.
 	it("should correctly load a nested property from a .env file", () => {
 		fs.writeFileSync(TEST_ENV_PATH, 'DC_TOKEN="env_token"');
 		const schema = {
@@ -39,6 +41,8 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 		expect(token).toBe("env_token");
 	});
 
+	// Verifies that the 'prop' option can be used to map an environment
+	// variable with a custom name to a schema property.
 	it("should load a property using a custom name via the 'prop' option", () => {
 		process.env.DISCORD_TOKEN = "custom_prop_token";
 		const schema = {
@@ -53,6 +57,8 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 		expect(config.get("dc.token")).toBe("custom_prop_token");
 	});
 
+	// Ensures that if a value is not provided by any external source,
+	// the default value specified in the schema is applied.
 	it("should apply a default value if the variable is not found", () => {
 		const schema = {
 			dc: {
@@ -66,6 +72,8 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 		expect(config.get("dc.token")).toBe("default_token");
 	});
 
+	// Tests a scenario where the final configuration is a combination of
+	// values from the environment and default values from the schema.
 	it("should correctly load a mix of sourced values and default values", () => {
 		fs.writeFileSync(TEST_ENV_PATH, 'APP_PORT=8080');
 		const schema = {
@@ -81,15 +89,15 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 		const config = new ConfigJS(envDriver, schema);
 		config.load({ path: TEST_ENV_PATH });
 
-		// `app` object should contain the value from the .env file and a default value
 		const app = config.root("app");
 		expect(app).toEqual({ port: 8080, name: "MyApp" });
 
-		// `db` object should be fully constructed from default values
 		const db = config.root("db");
 		expect(db).toEqual({ host: "localhost" });
 	});
 
+	// Confirms that when a variable is defined in both a .env file and
+	// process.env, the value from the .env file is given priority.
 	it("should prioritize .env file values over process.env values", () => {
 		fs.writeFileSync(TEST_ENV_PATH, 'DC_TOKEN="file_token"');
 		process.env.DC_TOKEN = "process_token";
@@ -105,6 +113,8 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 		expect(config.get("dc.token")).toBe("file_token");
 	});
 
+	// Verifies that calling set() not only updates the value in memory
+	// but also persists the change to the specified .env file.
 	it("should persist a new value to the .env file using set()", () => {
 		const schema = {
 			app: {
@@ -121,6 +131,8 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 		expect(fileContent).toContain("APP_PORT=9999");
 	});
 
+	// Checks the functionality of the `has()` method for both single and
+	// multiple properties, confirming it correctly identifies existing and non-existing keys.
 	it("should check for single or multiple properties with has()", () => {
 		fs.writeFileSync(TEST_ENV_PATH, "APP_PORT=8080");
 		const schema = {
@@ -134,22 +146,24 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 		const config = new ConfigJS(envDriver, schema);
 		config.load({ path: TEST_ENV_PATH });
 
-		// Test single properties
-		expect(config.has("app.port")).toBe(true); // From .env
-		expect(config.has("app.name")).toBe(true); // From default
-		expect(config.has("app.host")).toBe(false); // Not defined
-
-		// Test multiple properties
-		expect(config.has("app.port", "app.name")).toBe(true); // Both exist
-		expect(config.has("app.port", "app.host")).toBe(false); // One exists, one doesn't
-		expect(config.has("app.name", "app.port", "app.host")).toBe(false); // One doesn't exist
+		expect(config.has("app.port")).toBe(true);
+		expect(config.has("app.name")).toBe(true);
+		expect(config.has("app.host")).toBe(false);
+		expect(config.has("app.port", "app.name")).toBe(true);
+		expect(config.has("app.port", "app.host")).toBe(false);
+		expect(config.has("app.name", "app.port", "app.host")).toBe(false);
 	});
 
+	// Ensures that attempting to access configuration values before
+	// the configuration has been loaded results in a thrown error.
     it('should throw an error if get() is called before load()', () => {
         const config = new ConfigJS(envDriver, {});
         expect(() => config.get('any.path' as never)).toThrow('[ConfigJS] Config not loaded. Call load() first.');
     });
 
+	// Validates the `only_importants` feature, ensuring that validation is
+	// skipped for non-important properties but still enforced for required
+	// properties marked as `important: true`.
 	it("should skip non-important validations when only_importants is true", () => {
 		const schema = {
 			app: {
@@ -161,24 +175,19 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 			}
 		};
 
-		// This should fail because app.name and app.version are missing
 		const configFail = new ConfigJS(envDriver, schema);
 		expect(() => configFail.load({ path: TEST_ENV_PATH })).toThrow();
 
-		// Write only the important value
 		fs.writeFileSync(TEST_ENV_PATH, 'APP_VERSION=1.0.0');
 
-		// This should also fail because app.name is still missing
 		const configFail2 = new ConfigJS(envDriver, schema);
 		expect(() => configFail2.load({ path: TEST_ENV_PATH })).toThrow();
 
-		// This should succeed, as app.name is now optional
 		const configSuccess = new ConfigJS(envDriver, schema);
 		configSuccess.load({ path: TEST_ENV_PATH, only_importants: true });
 		expect(configSuccess.get('app.version')).toBe('1.0.0');
 		expect(configSuccess.has('app.name')).toBe(false);
 
-		// This should fail because the important app.version is missing
 		if (fs.existsSync(TEST_ENV_PATH)) fs.unlinkSync(TEST_ENV_PATH);
 		const configFailImportant = new ConfigJS(envDriver, schema);
 		expect(() => configFailImportant.load({ path: TEST_ENV_PATH, only_importants: true })).toThrow();

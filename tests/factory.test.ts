@@ -20,27 +20,31 @@ afterAll(() => {
 });
 
 describe("Schema Factory: c", () => {
-	// These tests verify that the `c` helper functions correctly create
+	// This suite verifies that the `c` helper functions correctly create
 	// the underlying TypeBox schema objects with the expected properties.
 	describe("Unit Tests for Schema Creation", () => {
+		// Tests the c.String helper for creating a string schema.
 		it("should create a string schema with a default value", () => {
 			const schema = c.String({ default: "hello" });
 			expect(schema.type).toBe("string");
 			expect(schema.default).toBe("hello");
 		});
 
+		// Tests the c.Number helper for creating a number schema.
 		it("should create a number schema with a default value", () => {
 			const schema = c.Number({ default: 123 });
 			expect(schema.type).toBe("number");
 			expect(schema.default).toBe(123);
 		});
 
+		// Tests the c.Boolean helper for creating a boolean schema.
 		it("should create a boolean schema with a default value", () => {
 			const schema = c.Boolean({ default: true });
 			expect(schema.type).toBe("boolean");
 			expect(schema.default).toBe(true);
 		});
 
+		// Tests the c.Object helper for creating an object schema.
 		it("should create an object schema with a default value", () => {
 			const schema = c.Object(
 				{ id: c.Number() },
@@ -50,12 +54,14 @@ describe("Schema Factory: c", () => {
 			expect(schema.default).toEqual({ id: 1 });
 		});
 
+		// Tests the c.Array helper for creating an array schema.
 		it("should create an array schema with a default value", () => {
 			const schema = c.Array(c.String(), { default: ["a", "b"] });
 			expect(schema.type).toBe("array");
 			expect(schema.default).toEqual(["a", "b"]);
 		});
 
+		// Tests the c.Record helper for creating a record/map schema.
 		it("should create a record schema with a default value", () => {
 			const schema = c.Record(c.String(), c.Number(), {
 				default: { key: 123 },
@@ -64,12 +70,14 @@ describe("Schema Factory: c", () => {
 			expect(schema.default).toEqual({ key: 123 });
 		});
 
+		// Tests creating a union schema from a simple array of strings.
 		it("should create an enum schema from a string array", () => {
 			const schema = c.Enum(["admin", "user"], { default: "user" });
 			expect(schema.anyOf).toHaveLength(2);
 			expect(schema.default).toBe("user");
 		});
 
+		// Tests creating a union schema from a const-asserted array.
 		it("should create an enum schema from a const string array", () => {
 			const ROLES = ["admin", "user"] as const;
 			const schema = c.Enum(ROLES, { default: "admin" });
@@ -78,6 +86,7 @@ describe("Schema Factory: c", () => {
 			expect(schema.default).toBe("admin");
 		});
 
+		// Tests creating a union schema from a numeric TypeScript enum.
 		it("should create an enum schema from a numeric TypeScript enum", () => {
 			enum Status {
 				Active = 1,
@@ -89,6 +98,7 @@ describe("Schema Factory: c", () => {
 			expect(schema.default).toBe(1);
 		});
 
+		// Tests creating a union schema from a string-based TypeScript enum.
 		it("should create an enum schema from a string TypeScript enum", () => {
 			enum Role {
 				Admin = "ADMIN",
@@ -103,6 +113,7 @@ describe("Schema Factory: c", () => {
 			expect(schema.default).toBe("USER");
 		});
 
+		// Verifies helpers for creating string schemas with specific formats (ipv4, email, uri).
 		it("should create schemas with special string formats", () => {
 			const ipSchema = c.ip({ default: "127.0.0.1" });
 			const emailSchema = c.email({ default: "test@example.com" });
@@ -119,10 +130,11 @@ describe("Schema Factory: c", () => {
 		});
 	});
 
-	// These tests verify that the created schemas work correctly when used
-	// with the main ConfigJS class and real drivers.
+	// This suite verifies that the schemas created by the factory work correctly
+	// when used with the main ConfigJS class and real drivers.
 	describe("Integration with Drivers", () => {
 		describe("JsonDriver", () => {
+			// Ensures that default values from a schema are loaded when the JSON file is missing.
 			it("should load default values when config file is missing", () => {
 				const schema = {
 					port: c.number({ default: 3000 }),
@@ -135,6 +147,7 @@ describe("Schema Factory: c", () => {
 				expect(config.get("name")).toBe("MyApp");
 			});
 
+			// Ensures that values from a JSON file override the schema's default values.
 			it("should load values from the json file over defaults", () => {
 				fs.writeFileSync(TEST_JSON_PATH, JSON.stringify({ port: 8080, name: "MyTestApp" }));
 				const schema = {
@@ -150,6 +163,7 @@ describe("Schema Factory: c", () => {
 		});
 
 		describe("EnvDriver", () => {
+			// Ensures that default values from a schema are loaded when the .env file is missing.
 			it("should load default values when .env file is missing", () => {
 				const schema = {
 					port: c.number({ default: 3000 }),
@@ -162,6 +176,7 @@ describe("Schema Factory: c", () => {
 				expect(config.get("appName")).toBe("MyApp");
 			});
 
+			// Ensures that values from a .env file override the schema's default values.
 			it("should load values from the .env file over defaults", () => {
 				fs.writeFileSync(TEST_ENV_PATH, "PORT=8080\nAPP_NAME=MyTestApp");
 				const schema = {

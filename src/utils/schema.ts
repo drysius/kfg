@@ -1,56 +1,56 @@
-import { Type, type TObject, type TProperties, type TSchema, TOptional } from '@sinclair/typebox';
+import { Type, type TObject, type TProperties, type TSchema } from '@sinclair/typebox';
+import { Value } from '@sinclair/typebox/value';
 import type { SchemaDefinition } from '../types';
 
-/**
- * Recursively traverses a compiled TypeBox schema object and adds a `{ default: {} }`
- * to any object node whose children are all optional or have default values.
- * This function modifies the schema object in-place.
- * @param schemaNode The current node of the compiled schema to process.
- */
+function hasImportant(definition: SchemaDefinition): boolean {
+    for (const key in definition) {
+        const value = (definition as any)[key];
+        if (value && value.important) {
+            return true;
+        }
+        if (typeof value === 'object' && value !== null && !value[Symbol.for('TypeBox.Kind')]) {
+            if (hasImportant(value)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 export function addSmartDefaults(schemaNode: TObject): void {
     if (schemaNode.type !== 'object' || !schemaNode.properties) {
         return;
     }
-
     let allChildrenOptional = true;
     for (const key in schemaNode.properties) {
         const prop = schemaNode.properties[key];
-
-        // Recurse first
         if (prop.type === 'object') {
             addSmartDefaults(prop as TObject);
         }
-
-        // Check if the property has a default or is optional
         const hasDefault = prop.default !== undefined;
-        const isOptional = (prop as TOptional<TSchema>).modifier === 'Optional';
-
-        // If the property is required (not optional) and has no default, then the parent can't get a default.
+        // Behavioral check for optionality
+        const isOptional = Value.Check(Type.Object({ temp: prop }), {});
         if (!hasDefault && !isOptional) {
             allChildrenOptional = false;
         }
     }
-
-    // If all children were optional and this object doesn't already have a default, add one.
     if (allChildrenOptional && schemaNode.default === undefined) {
         (schemaNode as any).default = {};
     }
 }
-
 
 export function buildTypeBoxSchema(definition: SchemaDefinition): TObject {
     const properties: TProperties = {};
     for (const key in definition) {
         const value = definition[key] as any;
         const isObject = typeof value === 'object' && value !== null && !value[Symbol.for('TypeBox.Kind')];
-
         if (isObject) {
             properties[key] = buildTypeBoxSchema(value);
         } else {
             properties[key] = value as TSchema;
         }
     }
-    return Type.Object(properties);
+    return Type.Object(properties, { additionalProperties: true });
 }
 
 export function buildDefaultObject(definition: SchemaDefinition): Record<string, any> {
@@ -70,14 +70,12 @@ export function buildDefaultObject(definition: SchemaDefinition): Record<string,
 
 export function makeSchemaOptional(definition: SchemaDefinition): SchemaDefinition {
     const newDefinition: Record<string, any> = {};
-
     for (const key in definition) {
         const value = (definition as any)[key];
-
         if (value && value[Symbol.for('TypeBox.Kind')]) {
-            const schema = value as TSchema & { important?: boolean, modifier?: string };
-
-            if (schema.important || schema.modifier === 'Optional') {
+            const schema = value as TSchema & { important?: boolean };
+            const isOptional = Value.Check(Type.Object({ temp: schema }), {});
+            if (schema.important || isOptional) {
                 newDefinition[key] = schema;
             } else {
                 newDefinition[key] = Type.Optional(schema);
