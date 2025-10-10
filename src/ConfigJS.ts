@@ -110,6 +110,6 @@ export class ConfigJS<
 		if (!this.loaded) {
 			throw new Error("[ConfigJS] Config not loaded. Call load() first.");
 		}
-		return getProperty(this.schema, path as string);
+		return getProperty(this.schema, path as string) as DeepGet<S, P>;
 	}
 }

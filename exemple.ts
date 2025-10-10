@@ -37,3 +37,4 @@ console.log(config.get('app.port'))
 console.log(config.get('test'))
 config.set('owners',["test", 'aaaaa', '123'])
 config.set('app.port', 3000);
+console.log(config.conf('app').port)
