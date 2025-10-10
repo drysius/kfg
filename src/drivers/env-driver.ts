@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { ConfigJSDriver } from "../driver";
 import type { SchemaDefinition, TSchema } from "../types";
-import { parse, updateEnvContent } from "../utils/env";
+import { parse, updateEnvContent, removeEnvKey } from "../utils/env";
 
 function getFilePath(config: { path?: string }): string {
 	return path.resolve(process.cwd(), config.path || ".env");
@@ -105,6 +105,16 @@ export const envDriver = new ConfigJSDriver({
 			value,
 			options?.description,
 		);
+		fs.writeFileSync(filePath, newContent);
+	},
+	onDel(key) {
+		const envKey = key.replace(/\./g, "_").toUpperCase();
+		const filePath = getFilePath(this.config);
+		if (!fs.existsSync(filePath)) {
+			return;
+		}
+		const currentContent = fs.readFileSync(filePath, "utf-8");
+		const newContent = removeEnvKey(currentContent, envKey);
 		fs.writeFileSync(filePath, newContent);
 	},
 });

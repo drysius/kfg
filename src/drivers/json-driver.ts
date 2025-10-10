@@ -109,4 +109,34 @@ export const jsonDriver = new ConfigJSDriver({
 		const filePath = getFilePath(this.config);
 		fs.writeFileSync(filePath, JSON.stringify(dataToSave, null, 2));
 	},
+	onDel(key) {
+		if (this.comments?.[key]) {
+			delete this.comments[key];
+		}
+
+		let dataToSave: Record<string, any>;
+		if (this.config.keyroot) {
+			dataToSave = flattenObject(this.data);
+			for (const path in this.comments) {
+				dataToSave[`${path}:comment`] = this.comments[path];
+			}
+		} else {
+			const dataWithComments = JSON.parse(JSON.stringify(this.data));
+			for (const path in this.comments) {
+				const keys = path.split(".");
+				const propName = keys.pop() as string;
+				const parentPath = keys.join(".");
+				const parentObject = parentPath
+					? getProperty(dataWithComments, parentPath)
+					: dataWithComments;
+				if (typeof parentObject === "object" && parentObject !== null) {
+					parentObject[`${propName}:comment`] = this.comments[path];
+				}
+			}
+			dataToSave = dataWithComments;
+		}
+
+		const filePath = getFilePath(this.config);
+		fs.writeFileSync(filePath, JSON.stringify(dataToSave, null, 2));
+	},
 });

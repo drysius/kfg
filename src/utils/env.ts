@@ -107,3 +107,31 @@ export function updateEnvContent(
 
 	return newLines.join("\n");
 }
+
+/**
+ * Removes a key from a .env file content string.
+ * @param content The original file content.
+ * @param key The key to remove.
+ * @returns The updated file content.
+ */
+export function removeEnvKey(content: string, key: string): string {
+	const lines = content.split(/\r?\n/);
+	const keyRegex = new RegExp(`^\\s*${key}\\s*=\\s*`);
+	const newLines: string[] = [];
+
+	for (const line of lines) {
+		if (keyRegex.test(line)) {
+			// key found, don't add it.
+			// if last line in newLines is a comment, remove it.
+			if (
+				newLines.length > 0 &&
+				newLines[newLines.length - 1].trim().startsWith("#")
+			) {
+				newLines.pop();
+			}
+		} else {
+			newLines.push(line);
+		}
+	}
+	return newLines.join("\n");
+}

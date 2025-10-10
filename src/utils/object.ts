@@ -78,3 +78,22 @@ export function unflattenObject(obj: Record<string, any>): Record<string, any> {
 	}
 	return result;
 }
+
+export function deleteProperty<T extends Record<string, any>>(
+	obj: T,
+	path: string,
+): boolean {
+	const keys = path.split(".");
+	const lastKey = keys.pop() as string;
+	let target: any = obj;
+	for (const key of keys) {
+		if (target?.[key] === undefined) {
+			return false;
+		}
+		target = target[key];
+	}
+	if (typeof target === "object" && target !== null) {
+		return delete target[lastKey];
+	}
+	return false;
+}

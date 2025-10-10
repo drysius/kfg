@@ -7,6 +7,7 @@ import type {
 	SchemaDefinition,
 	StaticSchema,
 } from "./types";
+import { getProperty } from "./utils/object";
 import { makeSchemaOptional } from "./utils/schema";
 
 export class ConfigJS<
@@ -96,5 +97,19 @@ export class ConfigJS<
 			throw new Error("[ConfigJS] Config not loaded. Call load() first.");
 		}
 		return this.driver.insert(path, partial) as inPromise<D["async"], void>;
+	}
+
+	public del<P extends Paths<StaticSchema<S>>>(path: P) {
+		if (!this.loaded) {
+			throw new Error("[ConfigJS] Config not loaded. Call load() first.");
+		}
+		return this.driver.del(path) as inPromise<D["async"], void>;
+	}
+
+	public conf<P extends Paths<StaticSchema<S>>>(path: P) {
+		if (!this.loaded) {
+			throw new Error("[ConfigJS] Config not loaded. Call load() first.");
+		}
+		return getProperty(this.schema, path as string);
 	}
 }

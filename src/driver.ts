@@ -11,7 +11,12 @@ import type {
 	SchemaDefinition,
 	StaticSchema,
 } from "./types";
-import { deepMerge, getProperty, setProperty } from "./utils/object";
+import {
+	deepMerge,
+	deleteProperty,
+	getProperty,
+	setProperty,
+} from "./utils/object";
 import {
 	addSmartDefaults,
 	buildDefaultObject,
@@ -38,6 +43,7 @@ export class ConfigJSDriver<
 		value: unknown,
 		options?: object,
 	) => inPromise<Async, void>;
+	private _onDel?: (this: any, key: string) => inPromise<Async, void>;
 
 	// Utilities passed to drivers
 	protected buildDefaultObject = buildDefaultObject;
@@ -49,6 +55,7 @@ export class ConfigJSDriver<
 		this.config = options.config || ({} as C);
 		this._onLoad = options.onLoad;
 		this._onSet = options.onSet;
+		this._onDel = options.onDel;
 	}
 
 	public load(
@@ -127,6 +134,19 @@ export class ConfigJSDriver<
 		Object.assign(currentObject, partial);
 
 		return this.set(path as any, currentObject as any);
+	}
+
+	public del<T = StaticSchema<any>, P extends Paths<T> = any>(
+		path: P,
+	): inPromise<Async, void> {
+		deleteProperty(this.data, path as string);
+		if (this._onDel) {
+			return this._onDel.call(this, path as string);
+		}
+		return (this.async ? Promise.resolve() : undefined) as inPromise<
+			Async,
+			void
+		>;
 	}
 
 	private validate(config = this.data): void {

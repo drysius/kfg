@@ -64,6 +64,12 @@ export type DriverOnSet<
 	options?: { description?: string },
 ) => inPromise<A, void>;
 
+export type DriverOnDel<
+	C extends DriverConfig,
+	S extends DriverStore,
+	A extends boolean,
+> = (this: ConfigJSDriver<C, S, A>, key: string) => inPromise<A, void>;
+
 export interface ConfigJSDriverOptions<
 	C extends DriverConfig,
 	S extends DriverStore,
@@ -75,6 +81,7 @@ export interface ConfigJSDriverOptions<
 	getEnvKeyForPath?: (path: string) => string;
 	onLoad?: DriverOnLoad<C, S, A>;
 	onSet?: DriverOnSet<C, S, A>;
+	onDel?: DriverOnDel<C, S, A>;
 }
 
 // --- Schema Related Types ---
