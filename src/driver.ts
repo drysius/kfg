@@ -1,4 +1,4 @@
-import type { TObject } from "@sinclair/typebox";
+import { TObject } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import type {
 	ConfigJSDriverOptions,
@@ -49,7 +49,7 @@ export class ConfigJSDriver<
 	protected buildDefaultObject = buildDefaultObject;
 	protected deepMerge = deepMerge;
 
-	constructor(options: ConfigJSDriverOptions<C, S, Async>) {
+	constructor(public readonly options: ConfigJSDriverOptions<C, S, Async>) {
 		this.identify = options.identify;
 		this.async = options.async as Async;
 		this.config = options.config || ({} as C);

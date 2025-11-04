@@ -14,8 +14,8 @@ export class ConfigJS<
 	D extends ConfigJSDriver<any, any, any>,
 	S extends SchemaDefinition,
 > {
-	private driver: D;
-	private schema: S;
+	public driver: D;
+	public schema: S;
 	private loaded = false;
 
 	constructor(driver: D, schema: S) {
@@ -111,5 +111,19 @@ export class ConfigJS<
 			throw new Error("[ConfigJS] Config not loaded. Call load() first.");
 		}
 		return getProperty(this.schema, path as string) as DeepGet<S, P>;
+	}
+
+	/**
+	 * Returns cached data
+	 * @returns 
+	 */
+	public async toJSON() {
+		if (!this.loaded) {
+			throw new Error("[ConfigJS] Config not loaded. Call load() first.");
+		}
+		if (this.driver.async) {
+			return Promise.resolve(this.driver.data) as inPromise<D["async"], StaticSchema<S>>;
+		}
+		return this.driver.data as inPromise<D["async"], StaticSchema<S>>;
 	}
 }

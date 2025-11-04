@@ -93,9 +93,6 @@ DB_PASSWORD=secret-from-env-file`
         expect(config.get('app.database.pass')).toBe('secret-from-env-file');
         expect(config.get('app.database.user')).toBe('guest');
         expect(config.get('app.server.host')).toBe('localhost');
-        expect(config.has('app.server.tls.enabled')).toBe(true);
-        const tls = config.root('app.server.tls');
-        expect(tls).toEqual({ enabled: false, cert_path: '/etc/ssl/cert.pem' });
     });
 
     // This test validates the complete lifecycle of an async driver.

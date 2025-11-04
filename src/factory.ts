@@ -119,6 +119,16 @@ const _c = {
 
 	/** Creates an Optional schema. */
 	Optional: <Schema extends TSchema>(schema: Schema) => Type.Optional(schema),
+
+	/** Creates a Number schema that defaults to a random value if not provided. */
+	Random: (options?: NumberOptions & { max?: number }) => {
+		const { max = 100, ...rest } = options || {};
+		return Type.Number({
+			...rest,
+			[Symbol.for("isRandom")]: true,
+			max,
+		});
+	},
 };
 
 /**
@@ -140,4 +150,5 @@ export const c = {
 	url: _c.URL,
 	any: _c.Any,
 	optional: _c.Optional,
+	random: _c.Random,
 };

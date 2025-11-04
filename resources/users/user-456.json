@@ -1,0 +1,9 @@
+{
+  "name": "Alice",
+  "age": 30,
+  "is_active": true,
+  "inventory_ids": [
+    "inv-1",
+    "inv-2"
+  ]
+}

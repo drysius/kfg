@@ -1,5 +1,5 @@
-import type { Static, TObject, TSchema } from "@sinclair/typebox";
-export type { TSchema, TObject };
+import type { Static, TObject, TSchema, SchemaOptions } from "@sinclair/typebox";
+export type { TSchema, TObject, SchemaOptions };
 
 import type { ConfigJSDriver } from "./driver";
 

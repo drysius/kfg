@@ -79,9 +79,11 @@ export const jsonDriver = new ConfigJSDriver({
 		return this.store;
 	},
 	onSet(key, _value, options) {
-		this.comments = this.comments || {};
-		if (options?.description) {
-			this.comments[key] = options.description;
+		if (key) {
+			this.comments = this.comments || {};
+			if (options?.description) {
+				this.comments[key] = options.description;
+			}
 		}
 
 		let dataToSave: Record<string, any>;

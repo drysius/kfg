@@ -128,6 +128,14 @@ describe("Schema Factory: c", () => {
 			expect(urlSchema.format).toBe("uri");
 			expect(urlSchema.default).toBe("https://example.com");
 		});
+
+		// Tests the c.Random helper for creating a random number schema.
+		it("should create a random number schema with correct properties", () => {
+			const schema = c.Random({ max: 500 });
+			expect(schema.type).toBe("number");
+			expect(schema[Symbol.for("isRandom")]).toBe(true);
+			expect(schema.max).toBe(500);
+		});
 	});
 
 	// This suite verifies that the schemas created by the factory work correctly
