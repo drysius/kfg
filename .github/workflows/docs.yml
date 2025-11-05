@@ -5,6 +5,11 @@ on:
       - main
 jobs:
   docs:
+    permissions:
+      contents: read
+      pages: write      # Necessário para deploy
+      id-token: write   # NECESSÁRIO para OIDC
+
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
