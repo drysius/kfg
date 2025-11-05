@@ -2,25 +2,36 @@ import { describe, it, expect, afterAll, beforeEach } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as fsp from 'node:fs/promises';
-import { ConfigFS, c, jsonDriver, FileFSConfigJS } from '../src/index';
+import { ConfigFS, c, cfs, jsonDriver } from '../src/index';
 import { Type } from '@sinclair/typebox';
-Type.Unsafe
+
 const TEST_DIR = path.join(__dirname, 'configfs-test-files');
 const USER_DIR = path.join(TEST_DIR, 'users');
 const INVENTORY_DIR = path.join(TEST_DIR, 'inventory');
 
-const InventorySchema = c.object({
-    items: c.array(c.string(), { default: [] }),
-});
-const UserSchema = c.object({
-    name: c.string({ default: 'Test User' }),
-    inventory_ids: c.array(c.string(), { default: [] }),
-});
+// 1. Define o ConfigFS para Inventário
+const InventoryConfigFS = new ConfigFS(jsonDriver, {
+    item: c.array(c.string(), { default: [], description: "Lista de itens no inventário" }),
+    location: c.string({ default: "warehouse", description: "Localização do inventário" }),
+}, { only_importants: true });
 
-const InventoryConfigFS = new ConfigFS(jsonDriver, InventorySchema);
-const UserConfigFS = new ConfigFS(jsonDriver, UserSchema);
+const UserSchema = {
+    name: c.string({ default: "New User", description: "Nome do usuário" }),
+    age: c.number({ default: 18, description: "Idade do usuário" }),
+    is_active: c.boolean({ default: true, description: "Status de atividade do usuário" }),
+    inventory_ids: cfs.many(InventoryConfigFS, {
+        default: [],
+        description: "Lista de IDs de inventário pertencentes ao usuário",
+    }),
+    address: {
+        street: c.string({ default: '' }),
+        city: c.string({ default: '' }),
+    },
+};
 
-describe('ConfigFS Core Functionality', () => {
+const UserConfigFS = new ConfigFS(jsonDriver, UserSchema, { only_importants: true });
+
+describe('ConfigFS v2', () => {
     beforeEach(async () => {
         if (fs.existsSync(TEST_DIR)) {
             await fsp.rm(TEST_DIR, { recursive: true, force: true });
@@ -37,56 +48,100 @@ describe('ConfigFS Core Functionality', () => {
         }
     });
 
-    it('should create instance, load defaults, set, and save', async () => {
-        const userFile = UserConfigFS.file('user-1');
-        await userFile.load(); // Loads defaults from schema
-        
-        expect(userFile.get('name')).toBe('Test User');
+    it('should create and manage inventory items', async () => {
+        const inv1 = InventoryConfigFS.file("inv-1");
+        inv1.set("item", ["espada", "escudo"]);
+        inv1.set("location", "arsenal");
 
-        userFile.set('name', 'New Name');
+        const inv2 = InventoryConfigFS.file("inv-2");
+        inv2.set("item", ["poção", "pergaminho"]);
+
+        const inv1Data = await inv1.toJSON();
+        expect(inv1Data.item).toEqual(["espada", "escudo"]);
+        expect(inv1Data.location).toBe("arsenal");
+
+        const inv2Data = await inv2.toJSON();
+        expect(inv2Data.item).toEqual(["poção", "pergaminho"]);
+        expect(inv2Data.location).toBe("warehouse"); // Default value
+    });
+
+    it('should create and manage a user with relationships', async () => {
+        const user1 = UserConfigFS.file("user-123");
+        user1.set("name", "Alice");
+        user1.set("age", 30);
+        user1.set("is_active", true);
+        user1.set("inventory_ids", ["inv-1", "inv-2"]);
+
+        const userData = await user1.toJSON();
+        expect(userData.name).toBe("Alice");
+        expect(userData.age).toBe(30);
+        expect(userData.is_active).toBe(true);
+        expect(userData.inventory_ids).toEqual(["inv-1", "inv-2"]);
+    });
+
+    it('should access related inventories using getMany', async () => {
+        // Create inventories first
+        const inv1 = InventoryConfigFS.file("inv-1");
+        inv1.set("item", ["espada", "escudo"]);
+
+        const inv2 = InventoryConfigFS.file("inv-2");
+        inv2.set("item", ["poção", "pergaminho"]);
+
+        // Create user and link inventories
+        const user1 = UserConfigFS.file("user-123");
+        user1.set("inventory_ids", ["inv-1", "inv-2"]);
+
+        const user1Inventories = await user1.getMany("inventory_ids");
+        expect(user1Inventories).toBeDefined();
+        expect(user1Inventories!.length).toBe(2);
+
+        const inv1Data = await user1Inventories![0].toJSON();
+        expect(inv1Data.item).toEqual(["espada", "escudo"]);
+
+        const inv2Data = await user1Inventories![1].toJSON();
+        expect(inv2Data.item).toEqual(["poção", "pergaminho"]);
+    });
+
+    it('should get, has, and insert data', async () => {
+        const userFile = UserConfigFS.file('user-1');
+        //console.log(userFile)
+        // Test get
+        expect(userFile.get('name')).toBe('New User');
+
+        // Test has
+        expect(userFile.has('name')).toBe(true);
+        expect(userFile.has('age')).toBe(true);
+        expect(userFile.has('is_active')).toBe(true);
+        expect(userFile.has('inventory_ids')).toBe(true);
+        expect(userFile.has('nonexistent' as any)).toBe(false);
+
+        // Test insert
+        userFile.insert('address', { street: '123 Main St' });
+        expect(userFile.get('address.street')).toBe('123 Main St');
+
         await userFile.save();
 
-        expect(fs.existsSync(userFile.filePath)).toBe(true);
         const raw = fs.readFileSync(userFile.filePath, 'utf-8');
         const data = JSON.parse(raw);
-        expect(data.name).toBe('New Name');
-        // Check if default for other field is also saved
-        expect(data.inventory_ids).toEqual([]);
+        expect(data.address.street).toBe('123 Main St');
     });
 
-    it('should handle relationships using the public API', async () => {
-        // 1. Create and save an inventory item
-        const inv1 = InventoryConfigFS.file('inv-1');
-        await inv1.load();
-        inv1.set('items', ['sword']);
-        await inv1.save();
+    it('should demonstrate other ConfigFS manager methods', async () => {
+        // Create a user to be copied and deleted
+        const user1 = UserConfigFS.file("user-123");
+        user1.set("name", "Alice");
 
-        // 2. Create a user, link inventory, and save
-        const userFile = UserConfigFS.file('user-rel');
-        await userFile.load();
-        userFile.set('inventory_ids', ['inv-1']);
-        await userFile.save();
+        // Copy user-123 to user-456
+        UserConfigFS.copy("user-123", "user-456");
+        const user2 = UserConfigFS.file("user-456");
+        const user2Data = await user2.toJSON();
+        expect(user2Data.name).toBe("Alice");
 
-        // 3. Load the user again to get the saved data
-        const userToLoad = UserConfigFS.file('user-rel');
-        await userToLoad.load();
-        const inventoryIds = userToLoad.get('inventory_ids');
-        expect(inventoryIds).toEqual(['inv-1']);
-
-        // 4. Manually retrieve the related inventory files
-        const inventoryPromises = inventoryIds.map(id => InventoryConfigFS.file(id));
-        const inventories = await Promise.all(inventoryPromises);
-        
-        // 5. Load the inventory data and assert
-        await inventories[0].load();
-        expect(inventories[0].get('items')).toEqual(['sword']);
-    });
-
-    it('should delete files with del()', async () => {
-        const userFile = UserConfigFS.file('user-del');
-        await userFile.save();
-        expect(fs.existsSync(userFile.filePath)).toBe(true);
-        UserConfigFS.del('user-del');
-        expect(fs.existsSync(userFile.filePath)).toBe(false);
+        // Delete user-123
+        UserConfigFS.del("user-123");
+        expect(fs.existsSync(user1.filePath)).toBe(false); // Check if file is deleted
+        const deletedUser = UserConfigFS.file("user-123");
+        const deletedUserData = await deletedUser.toJSON();
+        expect(deletedUserData.name).toBe("New User"); // Should be default value
     });
 });

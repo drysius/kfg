@@ -58,10 +58,10 @@ describe('Complex Scenarios', () => {
             server: {
                 host: c.string({ default: 'localhost' }),
                 port: c.number({ default: 3000 }),
-                tls: c.object({
+                tls:{
                     enabled: c.boolean({ default: false }),
                     cert_path: c.string({ default: '/etc/ssl/cert.pem' })
-                }, { default: {} })
+                }
             },
             database: {
                 host: c.string(),

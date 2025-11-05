@@ -28,7 +28,7 @@ export class ConfigJS<
 	 * @param options - The loading options.
 	 */
 	public load(
-		options?: D["config"] & {
+		options?: Partial<D["config"]> & {
 			/**
 			 * If true, all schema properties will be treated as optional during validation,
 			 * except for those marked as `important: true`. This is useful for loading a
@@ -110,7 +110,7 @@ export class ConfigJS<
 		if (!this.loaded) {
 			throw new Error("[ConfigJS] Config not loaded. Call load() first.");
 		}
-		return getProperty(this.schema, path as string) as DeepGet<S, P>;
+		return getProperty((this.schema as any).properties, path as string) as DeepGet<S, P>;
 	}
 
 	/**

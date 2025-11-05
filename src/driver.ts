@@ -89,6 +89,7 @@ export class ConfigJSDriver<
 	public get<T = StaticSchema<any>, P extends Paths<T> = any>(
 		path: P,
 	): inPromise<Async, DeepGet<T, P>> {
+        //console.log('get', this.data)
 		const value = getProperty(this.data, path as string);
 		if (this.async) {
 			return Promise.resolve(value) as any;
@@ -113,7 +114,9 @@ export class ConfigJSDriver<
 		value: DeepGet<T, P>,
 		options?: { description?: string },
 	): inPromise<Async, void> {
-		setProperty(this.data, path as string, value);
+		if (path) { // <--- Add this check
+			setProperty(this.data, path as string, value);
+		}
 		if (this._onSet) {
 			return this._onSet.call(this, path as string, value, options);
 		}
@@ -152,7 +155,7 @@ export class ConfigJSDriver<
 	private validate(config = this.data): void {
 		if (!this.compiledSchema) return;
 
-		Value.Default(this.compiledSchema, config);
+		this.data = Value.Default(this.compiledSchema, {}) as any;
 		Value.Convert(this.compiledSchema, config);
 
 		if (!Value.Check(this.compiledSchema, config)) {

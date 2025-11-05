@@ -1,32 +1,30 @@
-import { ConfigFS, c, cfs, jsonDriver } from "./src/index";
+import { ConfigFS, ConfigJS, c, cfs, jsonDriver } from "./src/index";
 import * as path from "node:path";
 import * as fs from "node:fs";
 
-// 1. Definir o ConfigFS para Inventário
-// Cada instância de inventário será um arquivo JSON separado.
-const InventoryConfigFS = new ConfigFS(jsonDriver, {
-	item: c.array(c.string(), { default: [], description: "Lista de itens no inventário" }),
-	location: c.string({ default: "warehouse", description: "Localização do inventário" }),
+const licenças = new ConfigFS(jsonDriver, {
+	key:c.string(),
+	create_at:c.number(),
+	expire_in:c.number()
 });
 
-// Inicializar o ConfigFS para Inventário, definindo como os caminhos dos arquivos serão gerados.
-InventoryConfigFS.init((id) =>
+licenças.init((id) =>
 	path.join(process.cwd(), "resources/inventory", id + ".json")
 );
 
-// 2. Definir o ConfigFS para Usuário
-// Cada instância de usuário será um arquivo JSON separado.
-const UserConfigFS = new ConfigFS(jsonDriver, {
+const teste = {
 	name: c.string({ default: "New User", description: "Nome do usuário" }),
 	age: c.number({ default: 18, description: "Idade do usuário" }),
 	is_active: c.boolean({ default: true, description: "Status de atividade do usuário" }),
-	// Usar cfs.many para definir um relacionamento 'to-many' com InventoryConfigFS.
-	// O campo 'inventory_ids' armazenará um array de IDs de inventário.
-	inventory_ids: cfs.many(InventoryConfigFS, {
+	licencas_ids: cfs.many(licenças, {
 		default: [],
 		description: "Lista de IDs de inventário pertencentes ao usuário",
 	}),
-});
+}
+
+const UserConfigFS = new ConfigFS(jsonDriver, teste);
+
+const user = new ConfigJS(jsonDriver,teste)
 
 // Inicializar o ConfigFS para Usuário, definindo como os caminhos dos arquivos serão gerados.
 UserConfigFS.init((id) =>

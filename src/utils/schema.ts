@@ -6,8 +6,7 @@ import {
 } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import type { SchemaDefinition } from "../types";
-
-	export function addSmartDefaults(schemaNode: TObject): void {
+export function addSmartDefaults(schemaNode: TObject): void {
 	if (schemaNode.type !== "object" || !schemaNode.properties) {
 		return;
 	}
@@ -16,12 +15,12 @@ import type { SchemaDefinition } from "../types";
 		const prop = schemaNode.properties[key];
 
 		// Ignore Unsafe schemas (used by cfs) as they are not standard TypeBox schemas
-		if (prop[Symbol.for("TypeBox.Kind")] === "Unsafe") {
+		if (prop[Symbol.for("TypeBox.Kind") as any] === "Unsafe") {
 			continue;
 		}
 
 		// Only recurse if the property is a valid TypeBox object schema
-		if (prop.type === "object" && prop[Symbol.for("TypeBox.Kind")]) {
+		if (prop.type === "object" && prop[Symbol.for("TypeBox.Kind") as any]) {
 			addSmartDefaults(prop as TObject);
 		}
 		const hasDefault = prop.default !== undefined;
@@ -36,17 +35,13 @@ import type { SchemaDefinition } from "../types";
 	}
 }
 export function buildTypeBoxSchema(definition: SchemaDefinition): TObject {
+	if (definition[Symbol.for("TypeBox.Kind") as any] === 'Object') {
+		return definition as TObject;
+	}
+
 	const properties: TProperties = {};
 	for (const key in definition) {
 		const value = definition[key] as any;
-
-		if (
-			value &&
-			(value[Symbol.for("ConfigFS.many")] ||
-				value[Symbol.for("ConfigFS.join")])
-		) {
-			continue;
-		}
 
 		const isObject =
 			typeof value === "object" &&

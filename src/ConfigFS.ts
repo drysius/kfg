@@ -7,12 +7,12 @@ import { CFS_MANY_SYMBOL } from "./fs-factory";
 type ManyPaths<S extends SchemaDefinition> = S extends TSchema
 	? never
 	: {
-			[K in keyof S]: S[K] extends TSchema & { [CFS_MANY_SYMBOL]?: any }
-				? K
-				: S[K] extends SchemaDefinition
-				? `${K & string}.${ManyPaths<S[K]>}`
-				: never;
-	  }[keyof S];
+		[K in keyof S]: S[K] extends TSchema & { [CFS_MANY_SYMBOL]?: any }
+		? K
+		: S[K] extends SchemaDefinition
+		? `${K & string}.${ManyPaths<S[K]>}`
+		: never;
+	}[keyof S];
 
 export class FileFSConfigJS<
 	D extends ConfigJSDriver<any, any, any>,
@@ -40,7 +40,9 @@ export class FileFSConfigJS<
 	public getMany<P extends ManyPaths<S>>(
 		path: P,
 	): inPromise<D["async"], FileFSConfigJS<any, any>[] | undefined> {
-		const schema = this.conf(path as any);
+		const schema = this.conf(path as any) as any;
+		console.log(schema)
+		
 		const manyInfo = (schema as any)[CFS_MANY_SYMBOL];
 
 		if (!manyInfo) {
@@ -48,6 +50,7 @@ export class FileFSConfigJS<
 		}
 
 		const ids = this.get(path as any) as unknown as string[];
+
 		if (!ids || !Array.isArray(ids)) {
 			return undefined as any;
 		}
@@ -76,6 +79,14 @@ export class ConfigFS<
 	constructor(
 		private driver: D,
 		private schema: S,
+		private config?: Partial<D["config"]> & {
+			/**
+			 * If true, all schema properties will be treated as optional during validation,
+			 * except for those marked as `important: true`. This is useful for loading a
+			 * partial configuration without triggering validation errors for missing values.
+			 */
+			only_importants?: boolean;
+		}
 	) { }
 
 	public init(pathFn: (id: string) => string) {
@@ -96,7 +107,7 @@ export class ConfigFS<
 		) as D;
 		const fileInstance = new FileFSConfigJS(newDriver, this.schema, filePath);
 
-		const loadResult = fileInstance.load();
+		const loadResult = fileInstance.load(this.config);
 
 		if (this.driver.async) {
 			return (loadResult as Promise<void>).then(
