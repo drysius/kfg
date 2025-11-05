@@ -1,4 +1,4 @@
-import { TObject } from "@sinclair/typebox";
+import type { TObject } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import type {
 	ConfigJSDriverOptions,
@@ -89,7 +89,7 @@ export class ConfigJSDriver<
 	public get<T = StaticSchema<any>, P extends Paths<T> = any>(
 		path: P,
 	): inPromise<Async, DeepGet<T, P>> {
-        //console.log('get', this.data)
+		//console.log('get', this.data)
 		const value = getProperty(this.data, path as string);
 		if (this.async) {
 			return Promise.resolve(value) as any;
@@ -114,7 +114,8 @@ export class ConfigJSDriver<
 		value: DeepGet<T, P>,
 		options?: { description?: string },
 	): inPromise<Async, void> {
-		if (path) { // <--- Add this check
+		if (path) {
+			// <--- Add this check
 			setProperty(this.data, path as string, value);
 		}
 		if (this._onSet) {

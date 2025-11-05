@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { ConfigJSDriver } from "../driver";
 import type { SchemaDefinition, TSchema } from "../types";
-import { parse, updateEnvContent, removeEnvKey } from "../utils/env";
+import { parse, removeEnvKey, updateEnvContent } from "../utils/env";
 
 function getFilePath(config: { path?: string }): string {
 	return path.resolve(process.cwd(), config.path || ".env");

@@ -6,7 +6,7 @@ const licenças = new ConfigFS(jsonDriver, {
 	key:c.string(),
 	create_at:c.number(),
 	expire_in:c.number()
-});
+}, { only_importants: true });
 
 licenças.init((id) =>
 	path.join(process.cwd(), "resources/inventory", id + ".json")
@@ -22,13 +22,25 @@ const teste = {
 	}),
 }
 
-const UserConfigFS = new ConfigFS(jsonDriver, teste);
+const UserConfigFS = new ConfigFS(jsonDriver, teste, { only_importants:true });
 
-const user = new ConfigJS(jsonDriver,teste)
+const perfil = {
+    user_id:c.string(),
+    bio:c.string(),
+    user:cfs.join(UserConfigFS,{
+        fk:"user_id"
+    })
+}
+
+const PerfilConfigFS = new ConfigFS(jsonDriver,perfil, { only_importants:true })
 
 // Inicializar o ConfigFS para Usuário, definindo como os caminhos dos arquivos serão gerados.
 UserConfigFS.init((id) =>
 	path.join(process.cwd(), "resources/users", id + ".json")
+);
+
+PerfilConfigFS.init((id) =>
+    path.join(process.cwd(), "resources/profiles", id + ".json")
 );
 
 async function runExample() {
@@ -37,17 +49,22 @@ async function runExample() {
 	// Garantir que os diretórios de recursos existam
 	fs.mkdirSync(path.join(process.cwd(), "resources/inventory"), { recursive: true });
 	fs.mkdirSync(path.join(process.cwd(), "resources/users"), { recursive: true });
+	fs.mkdirSync(path.join(process.cwd(), "resources/profiles"), { recursive: true });
 
 	// --- Criar e gerenciar itens de Inventário ---
 	console.log("\n--- Gerenciando Inventários ---");
-	const inv1 = InventoryConfigFS.file("inv-1");
+	const inv1 = licenças.file("inv-1");
+	inv1.set("key", "key-1");
+	inv1.set("create_at", Date.now());
+	inv1.set("expire_in", Date.now() + 1000 * 60 * 60 * 24 * 30);
 	await inv1.load(); // Carrega padrões ou dados existentes
-	inv1.set("item", ["espada", "escudo"]);
-	inv1.set("location", "arsenal");
 	console.log("Inventário 1 (inv-1):", await inv1.toJSON());
 
-	const inv2 = InventoryConfigFS.file("inv-2");
-	inv2.set("item", ["poção", "pergaminho"]);
+	const inv2 = licenças.file("inv-2");
+	inv2.set("key", "key-2");
+	inv2.set("create_at", Date.now());
+	inv2.set("expire_in", Date.now() + 1000 * 60 * 60 * 24 * 30);
+	await inv2.load();
 	console.log("Inventário 2 (inv-2):", await inv2.toJSON());
 
 	// --- Criar e gerenciar um Usuário ---
@@ -57,20 +74,21 @@ async function runExample() {
 	user1.set("name", "Alice");
 	user1.set("age", 30);
 	user1.set("is_active", true);
-	user1.set("inventory_ids", ["inv-1", "inv-2"]); // Atribuir inventários ao usuário
+	const valor = user1.get("licencas_ids")
+	user1.set("licencas_ids", ["inv-1", "inv-2"]); // Atribuir inventários ao usuário
 
 	console.log("Usuário 1 (user-123):", await user1.toJSON());
 
 	// --- Acessando inventários relacionados usando getMany ---
 	console.log("\n--- Acessando Inventários Relacionados ---");
-	const user1Inventories = user1.getMany("inventory_ids");
+	const user1Inventories = user1.getMany("licencas_ids");
 	if (user1Inventories) {
 		console.log("Inventários de Alice:");
 		for (const inv of user1Inventories) {
-			await inv.load(); // Carregar cada inventário relacionado
 			console.log(`  - Arquivo de Inventário: ${inv.filePath}`);
-			console.log(`    Itens: ${inv.get("item")}`);
-			console.log(`    Localização: ${inv.get("location")}`);
+			console.log(`    Key: ${inv.get("key")}`);
+			console.log(`    Created At: ${inv.get("create_at")}`);
+			console.log(`    Expires In: ${inv.get("expire_in")}`);
 		}
 	}
 
@@ -96,6 +114,16 @@ async function runExample() {
 		console.log("user-123 após deleção (deve ser padrão ou vazio):", await deletedUser.toJSON());
 	} catch (e) {
 		console.log("user-123 após deleção: Arquivo não encontrado, carregando padrões.");
+	}
+
+	// --- Acessando perfil relacionado usando getJoined ---
+	console.log("\n--- Acessando Perfil Relacionado ---");
+	const userProfile = PerfilConfigFS.file("profile-1");
+	userProfile.set("user_id", "user-456");
+	userProfile.set("bio", "Bio of user 456");
+	const joinedUser = await userProfile.getJoin("user");
+	if (joinedUser) {
+		console.log("Usuário juntado do perfil:", await joinedUser.toJSON());
 	}
 
 	console.log("\nExemplo de ConfigFS concluído.");

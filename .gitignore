@@ -13,6 +13,7 @@ test.ts
 coverage
 *.lcov
 
+resources
 # logs
 logs
 _.log

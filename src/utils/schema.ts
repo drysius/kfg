@@ -35,7 +35,7 @@ export function addSmartDefaults(schemaNode: TObject): void {
 	}
 }
 export function buildTypeBoxSchema(definition: SchemaDefinition): TObject {
-	if (definition[Symbol.for("TypeBox.Kind") as any] === 'Object') {
+	if (definition[Symbol.for("TypeBox.Kind") as any] === "Object") {
 		return definition as TObject;
 	}
 

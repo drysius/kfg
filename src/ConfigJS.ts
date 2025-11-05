@@ -110,19 +110,22 @@ export class ConfigJS<
 		if (!this.loaded) {
 			throw new Error("[ConfigJS] Config not loaded. Call load() first.");
 		}
-		return getProperty((this.schema as any).properties, path as string) as DeepGet<S, P>;
+		return getProperty(this.schema, path as string) as DeepGet<S, P>;
 	}
 
 	/**
 	 * Returns cached data
-	 * @returns 
+	 * @returns
 	 */
 	public async toJSON() {
 		if (!this.loaded) {
 			throw new Error("[ConfigJS] Config not loaded. Call load() first.");
 		}
 		if (this.driver.async) {
-			return Promise.resolve(this.driver.data) as inPromise<D["async"], StaticSchema<S>>;
+			return Promise.resolve(this.driver.data) as inPromise<
+				D["async"],
+				StaticSchema<S>
+			>;
 		}
 		return this.driver.data as inPromise<D["async"], StaticSchema<S>>;
 	}

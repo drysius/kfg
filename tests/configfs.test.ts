@@ -31,6 +31,16 @@ const UserSchema = {
 
 const UserConfigFS = new ConfigFS(jsonDriver, UserSchema, { only_importants: true });
 
+const USER_PROFILE_DIR = path.join(TEST_DIR, 'user-profiles');
+
+const UserProfileSchema = {
+    user_id: c.string({ description: "ID do usuário" }),
+    bio: c.string({ default: "", description: "Biografia do usuário" }),
+    user: cfs.join(UserConfigFS, { fk: 'user_id' }),
+};
+
+const UserProfileConfigFS = new ConfigFS(jsonDriver, UserProfileSchema, { only_importants: true });
+
 describe('ConfigFS v2', () => {
     beforeEach(async () => {
         if (fs.existsSync(TEST_DIR)) {
@@ -38,8 +48,10 @@ describe('ConfigFS v2', () => {
         }
         fs.mkdirSync(USER_DIR, { recursive: true });
         fs.mkdirSync(INVENTORY_DIR, { recursive: true });
+        fs.mkdirSync(USER_PROFILE_DIR, { recursive: true });
         InventoryConfigFS.init((id) => path.join(INVENTORY_DIR, `${id}.json`));
         UserConfigFS.init((id) => path.join(USER_DIR, `${id}.json`));
+        UserProfileConfigFS.init((id) => path.join(USER_PROFILE_DIR, `${id}.json`));
     });
 
     afterAll(async () => {
@@ -143,5 +155,26 @@ describe('ConfigFS v2', () => {
         const deletedUser = UserConfigFS.file("user-123");
         const deletedUserData = await deletedUser.toJSON();
         expect(deletedUserData.name).toBe("New User"); // Should be default value
+    });
+
+    it('should create and manage a user profile with a joined user', async () => {
+        const user1 = UserConfigFS.file("user-123");
+        user1.set("name", "Alice");
+        user1.set("age", 30);
+        await user1.save();
+
+        const userProfile1 = UserProfileConfigFS.file("profile-456");
+        userProfile1.set("user_id", "user-123");
+        userProfile1.set("bio", "Software Engineer");
+        await userProfile1.save();
+
+        const userProfileData = await userProfile1.toJSON();
+        expect(userProfileData.user_id).toBe("user-123");
+        expect(userProfileData.bio).toBe("Software Engineer");
+
+        const joinedUser = await userProfile1.getJoin("user");
+        expect(joinedUser).toBeDefined();
+        expect(joinedUser!.get('name')).toBe("Alice");
+        expect(joinedUser!.get('age')).toBe(30);
     });
 });
