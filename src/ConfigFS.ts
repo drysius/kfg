@@ -34,7 +34,7 @@ type RelationPaths<S extends SchemaDefinition> = S extends TSchema
 					: never;
 		}[keyof S];
 
-//@ts-expect-error more recursive types, ignore
+//@ts-ignore more recursive types, ignore
 export class FileFSConfigJS<
 	D extends ConfigJSDriver<any, any, any>,
 	S extends SchemaDefinition,
@@ -52,7 +52,7 @@ export class FileFSConfigJS<
 		return super.load(loadOptions);
 	}
 
-	//@ts-expect-error configfs change internal logic of configjs, ignore this
+	//@ts-ignore configfs change internal logic of configjs, ignore this
 	public override set<P extends Paths<StaticSchema<S>>>(
 		path: P,
 		value: StaticSchemaWithRelation<DeepGet<StaticSchema<S>, P>>,
@@ -61,23 +61,23 @@ export class FileFSConfigJS<
 		return super.set(path, value as any, options);
 	}
 
-	//@ts-expect-error configfs change internal logic of configjs, ignore this
+	//@ts-ignore configfs change internal logic of configjs, ignore this
 	public override insert<P extends Paths<StaticSchema<S>>>(
 		path: P,
 		value: Partial<StaticSchemaWithRelation<DeepGet<StaticSchema<S>, P>>>,
 	): inPromise<D["async"], void> {
-		//@ts-expect-error
+		//@ts-ignore
 		return super.insert(path, value as any);
 	}
 
-	//@ts-expect-error configfs change internal logic of configjs, ignore this
+	//@ts-ignore configfs change internal logic of configjs, ignore this
 	public override root<P extends Paths<StaticSchema<S>>>(
 		path: P,
 	): inPromise<
 		D["async"],
 		StaticSchemaWithRelation<DeepGet<StaticSchema<S>, P>>
 	> {
-		//@ts-expect-error more recursive types, ignore
+		//@ts-ignore more recursive types, ignore
 		return super.root(path) as never;
 	}
 
@@ -93,7 +93,7 @@ export class FileFSConfigJS<
 		return super.conf(path) as never;
 	}
 
-	//@ts-expect-error more recursive types, ignore
+	//@ts-ignore more recursive types, ignore
 	public override toJSON(): inPromise<
 		D["async"],
 		StaticSchemaWithRelation<StaticSchema<S>>

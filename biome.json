@@ -23,7 +23,8 @@
 				"noAccumulatingSpread": "off"
 			},
 			"suspicious": {
-				"noExplicitAny": "off"
+				"noExplicitAny": "off",
+				"noTsIgnore":"off"
 			},
 			"recommended": true
 		}
