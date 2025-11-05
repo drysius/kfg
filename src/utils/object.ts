@@ -1,3 +1,9 @@
+/**
+ * Gets a property from an object using a dot-separated path.
+ * @param obj The object to get the property from.
+ * @param path The path to the property.
+ * @returns The property value.
+ */
 export function getProperty<T extends Record<string, any>>(
 	obj: T,
 	path: string,
@@ -5,6 +11,12 @@ export function getProperty<T extends Record<string, any>>(
 	return path.split(".").reduce((acc, key) => acc?.[key], obj);
 }
 
+/**
+ * Sets a property on an object using a dot-separated path.
+ * @param obj The object to set the property on.
+ * @param path The path to the property.
+ * @param value The value to set.
+ */
 export function setProperty<T extends Record<string, any>>(
 	obj: T,
 	path: string,
@@ -24,10 +36,21 @@ export function setProperty<T extends Record<string, any>>(
 	target[lastKey] = value;
 }
 
+/**
+ * Checks if an item is an object.
+ * @param item The item to check.
+ * @returns True if the item is an object, false otherwise.
+ */
 export function isObject(item: any): item is Record<string, any> {
 	return item !== null && typeof item === "object" && !Array.isArray(item);
 }
 
+/**
+ * Deeply merges two objects.
+ * @param target The target object.
+ * @param source The source object.
+ * @returns The merged object.
+ */
 export function deepMerge<T extends object, U extends object>(
 	target: T,
 	source: U,
@@ -53,6 +76,12 @@ export function deepMerge<T extends object, U extends object>(
 	return output;
 }
 
+/**
+ * Flattens a nested object into a single-level object.
+ * @param obj The object to flatten.
+ * @param prefix The prefix to use for the keys.
+ * @returns The flattened object.
+ */
 export function flattenObject(
 	obj: Record<string, any>,
 	prefix = "",
@@ -71,6 +100,11 @@ export function flattenObject(
 	);
 }
 
+/**
+ * Unflattens a single-level object into a nested object.
+ * @param obj The object to unflatten.
+ * @returns The unflattened object.
+ */
 export function unflattenObject(obj: Record<string, any>): Record<string, any> {
 	const result = {};
 	for (const key in obj) {
@@ -79,6 +113,12 @@ export function unflattenObject(obj: Record<string, any>): Record<string, any> {
 	return result;
 }
 
+/**
+ * Deletes a property from an object using a dot-separated path.
+ * @param obj The object to delete the property from.
+ * @param path The path to the property.
+ * @returns True if the property was deleted, false otherwise.
+ */
 export function deleteProperty<T extends Record<string, any>>(
 	obj: T,
 	path: string,

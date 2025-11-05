@@ -37,6 +37,9 @@ function getFilePath(config: { path?: string }): string {
 	return path.resolve(process.cwd(), config.path || "config.json");
 }
 
+/**
+ * A driver for loading configuration from JSON files.
+ */
 export const jsonDriver = new ConfigJSDriver({
 	identify: "json-driver",
 	async: false,

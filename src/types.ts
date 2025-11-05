@@ -3,13 +3,19 @@ import type {
 	Static,
 	TObject,
 	TSchema,
+	TUnsafe,
 } from "@sinclair/typebox";
 export type { TSchema, TObject, SchemaOptions };
 
+import type { FileFSConfigJS } from "./ConfigFS";
 import type { ConfigJSDriver } from "./driver";
 
 // --- Driver Related Types ---
 
+/**
+ * Represents a path to a value in an object.
+ * @template T The type of the object.
+ */
 export type Paths<T> = T extends object
 	? {
 			[K in keyof T]: K extends string
@@ -22,6 +28,10 @@ export type Paths<T> = T extends object
 		}[keyof T]
 	: never;
 
+/**
+ * Represents a path to a value in an object.
+ * @template T The type of the object.
+ */
 export type RootPaths<T> = T extends object
 	? {
 			[K in keyof T]: K extends string
@@ -34,6 +44,11 @@ export type RootPaths<T> = T extends object
 		}[keyof T]
 	: never;
 
+/**
+ * Gets the type of a value at a given path in an object.
+ * @template T The type of the object.
+ * @template P The path to the value.
+ */
 export type DeepGet<T, P extends string> = P extends `${infer K}.${infer R}`
 	? K extends keyof T
 		? DeepGet<T[K], R>
@@ -42,13 +57,30 @@ export type DeepGet<T, P extends string> = P extends `${infer K}.${infer R}`
 		? T[P]
 		: never;
 
+/**
+ * Represents a value that can be a promise or a plain value.
+ * @template Async The type of the async flag.
+ * @template Result The type of the result.
+ */
 export type inPromise<Async extends boolean, Result> = Async extends true
 	? Promise<Result>
 	: Result;
 
+/**
+ * Represents the configuration of a driver.
+ */
 export type DriverConfig = Record<string, unknown>;
+/**
+ * Represents the store of a driver.
+ */
 export type DriverStore = Record<string, unknown>;
 
+/**
+ * Represents the onLoad method of a driver.
+ * @template C The type of the driver configuration.
+ * @template S The type of the driver store.
+ * @template A The type of the async flag.
+ */
 export type DriverOnLoad<
 	C extends DriverConfig,
 	S extends DriverStore,
@@ -58,6 +90,12 @@ export type DriverOnLoad<
 	schema: SchemaDefinition,
 	opts: Partial<C>,
 ) => inPromise<A, any>;
+/**
+ * Represents the onSet method of a driver.
+ * @template C The type of the driver configuration.
+ * @template S The type of the driver store.
+ * @template A The type of the async flag.
+ */
 export type DriverOnSet<
 	C extends DriverConfig,
 	S extends DriverStore,
@@ -69,12 +107,24 @@ export type DriverOnSet<
 	options?: { description?: string },
 ) => inPromise<A, void>;
 
+/**
+ * Represents the onDel method of a driver.
+ * @template C The type of the driver configuration.
+ * @template S The type of the driver store.
+ * @template A The type of the async flag.
+ */
 export type DriverOnDel<
 	C extends DriverConfig,
 	S extends DriverStore,
 	A extends boolean,
 > = (this: ConfigJSDriver<C, S, A>, key: string) => inPromise<A, void>;
 
+/**
+ * Represents the options of a driver.
+ * @template C The type of the driver configuration.
+ * @template S The type of the driver store.
+ * @template A The type of the async flag.
+ */
 export interface ConfigJSDriverOptions<
 	C extends DriverConfig,
 	S extends DriverStore,
@@ -90,6 +140,36 @@ export interface ConfigJSDriverOptions<
 }
 
 // --- Schema Related Types ---
+
+/**
+ * Represents the static schema with relations.
+ * @template S The type of the schema.
+ */
+export type StaticSchemaWithRelation<S> = S extends TSchema
+	? StaticSchema<S>
+	: {
+			[K in keyof S]: S[K] extends FileFSConfigJS<any, any>
+				? string
+				: S[K] extends FileFSConfigJS<any, any>[]
+					? string[]
+					: StaticSchemaWithRelation<S[K]>;
+		};
+
+/**
+ * Represents the paths to the relations in a schema.
+ * @template S The type of the schema.
+ */
+export type RelationPaths<S extends SchemaDefinition> = S extends TSchema
+	? never
+	: {
+			[K in keyof S]: S[K] extends
+				| TUnsafe<FileFSConfigJS<any, any>>
+				| TUnsafe<FileFSConfigJS<any, any>[]>
+				? K
+				: S[K] extends SchemaDefinition
+					? `${K & string}.${RelationPaths<S[K]>}`
+					: never;
+		}[keyof S];
 
 /**
  * A recursive type representing the user-friendly schema definition.

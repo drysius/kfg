@@ -69,6 +69,9 @@ function traverseSchema(
 	return builtConfig;
 }
 
+/**
+ * A driver for loading configuration from environment variables and .env files.
+ */
 export const envDriver = new ConfigJSDriver({
 	identify: "env-driver",
 	async: false,

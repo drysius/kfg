@@ -24,7 +24,7 @@
 			},
 			"suspicious": {
 				"noExplicitAny": "off",
-				"noTsIgnore":"off"
+				"noTsIgnore": "off"
 			},
 			"recommended": true
 		}

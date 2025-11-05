@@ -6,6 +6,10 @@ import {
 } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import type { SchemaDefinition } from "../types";
+/**
+ * Adds smart defaults to a TypeBox schema.
+ * @param schemaNode The schema to add the defaults to.
+ */
 export function addSmartDefaults(schemaNode: TObject): void {
 	if (schemaNode.type !== "object" || !schemaNode.properties) {
 		return;
@@ -34,6 +38,11 @@ export function addSmartDefaults(schemaNode: TObject): void {
 		(schemaNode as any).default = {};
 	}
 }
+/**
+ * Builds a TypeBox schema from a schema definition.
+ * @param definition The schema definition.
+ * @returns The TypeBox schema.
+ */
 export function buildTypeBoxSchema(definition: SchemaDefinition): TObject {
 	if (definition[Symbol.for("TypeBox.Kind") as any] === "Object") {
 		return definition as TObject;
@@ -56,6 +65,11 @@ export function buildTypeBoxSchema(definition: SchemaDefinition): TObject {
 	return Type.Object(properties, { additionalProperties: true });
 }
 
+/**
+ * Builds a default object from a schema definition.
+ * @param definition The schema definition.
+ * @returns The default object.
+ */
 export function buildDefaultObject(
 	definition: SchemaDefinition,
 ): Record<string, any> {
@@ -73,6 +87,11 @@ export function buildDefaultObject(
 	return obj;
 }
 
+/**
+ * Makes a schema optional.
+ * @param definition The schema definition.
+ * @returns The optional schema.
+ */
 export function makeSchemaOptional(
 	definition: SchemaDefinition,
 ): SchemaDefinition {

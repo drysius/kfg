@@ -23,6 +23,12 @@ import {
 	buildTypeBoxSchema,
 } from "./utils/schema";
 
+/**
+ * The base class for all drivers.
+ * @template C The type of the driver configuration.
+ * @template S The type of the driver store.
+ * @template Async The type of the async flag.
+ */
 export class ConfigJSDriver<
 	C extends DriverConfig,
 	S extends DriverStore,
@@ -49,6 +55,10 @@ export class ConfigJSDriver<
 	protected buildDefaultObject = buildDefaultObject;
 	protected deepMerge = deepMerge;
 
+	/**
+	 * Creates a new instance of ConfigJSDriver.
+	 * @param options The driver options.
+	 */
 	constructor(public readonly options: ConfigJSDriverOptions<C, S, Async>) {
 		this.identify = options.identify;
 		this.async = options.async as Async;
@@ -58,6 +68,11 @@ export class ConfigJSDriver<
 		this._onDel = options.onDel;
 	}
 
+	/**
+	 * Loads the configuration.
+	 * @param schema The schema to use for validating the configuration.
+	 * @param options The loading options.
+	 */
 	public load(
 		schema: SchemaDefinition,
 		options: Partial<C> = {},
@@ -86,6 +101,11 @@ export class ConfigJSDriver<
 		return undefined as inPromise<Async, void>;
 	}
 
+	/**
+	 * Gets a value from the configuration.
+	 * @param path The path to the value.
+	 * @returns The value at the given path.
+	 */
 	public get<T = StaticSchema<any>, P extends Paths<T> = any>(
 		path: P,
 	): inPromise<Async, DeepGet<T, P>> {
@@ -97,6 +117,11 @@ export class ConfigJSDriver<
 		return value as any;
 	}
 
+	/**
+	 * Checks if a value exists in the configuration.
+	 * @param paths The paths to the values.
+	 * @returns True if all values exist, false otherwise.
+	 */
 	public has<T = StaticSchema<any>, P extends Paths<T> = any>(
 		...paths: P[]
 	): inPromise<Async, boolean> {
@@ -109,6 +134,12 @@ export class ConfigJSDriver<
 		return hasAllProps as any;
 	}
 
+	/**
+	 * Sets a value in the configuration.
+	 * @param path The path to the value.
+	 * @param value The new value.
+	 * @param options The options for setting the value.
+	 */
 	public set<T = StaticSchema<any>, P extends Paths<T> = any>(
 		path: P,
 		value: DeepGet<T, P>,
@@ -127,6 +158,11 @@ export class ConfigJSDriver<
 		>;
 	}
 
+	/**
+	 * Inserts a partial value into an object in the configuration.
+	 * @param path The path to the object.
+	 * @param partial The partial value to insert.
+	 */
 	public insert<T = StaticSchema<any>, P extends RootPaths<T> = any>(
 		path: P,
 		partial: Partial<DeepGet<T, P>>,
@@ -140,6 +176,10 @@ export class ConfigJSDriver<
 		return this.set(path as any, currentObject as any);
 	}
 
+	/**
+	 * Deletes a value from the configuration.
+	 * @param path The path to the value.
+	 */
 	public del<T = StaticSchema<any>, P extends Paths<T> = any>(
 		path: P,
 	): inPromise<Async, void> {
@@ -153,6 +193,10 @@ export class ConfigJSDriver<
 		>;
 	}
 
+	/**
+	 * Validates the configuration against the schema.
+	 * @param config The configuration to validate.
+	 */
 	private validate(config = this.data): void {
 		if (!this.compiledSchema) return;
 
