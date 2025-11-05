@@ -5,11 +5,6 @@ on:
       - main
 jobs:
   docs:
-    permissions:
-      contents: read
-      pages: write      # Necessário para deploy
-      id-token: write   # NECESSÁRIO para OIDC
-
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -27,8 +22,3 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./docs
           force_orphan: true
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
