@@ -52,7 +52,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "bun run build.ts",
+"build": "tsc --project tsconfig.test.json && bun run build.ts",
+    "docs": "typedoc",
     "test": "bun test",
     "check": "biome check --write",
     "prebuild": "tsc --project tsconfig.test.json"
@@ -63,6 +64,7 @@
     "@types/node": "^24.3.0",
     "dts-bundle-generator": "^9.5.1",
     "tsup": "^8.4.0",
+    "typedoc": "^0.28.14",
     "typescript": "^5.8.3"
   },
   "dependencies": {

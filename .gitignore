@@ -7,6 +7,7 @@ config.json
 # output
 out
 dist
+docs
 *.tgz
 test.ts
 # code coverage
