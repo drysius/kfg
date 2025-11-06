@@ -51,7 +51,7 @@
   "bugs": {
     "url": "https://github.com/drylian/kfg/issues"
   },
-  "homepage": "https://github.com/drylian/kfg#readme",
+  "homepage": "https://kfg.drylian.com",
   "files": [
     "dist"
   ],
