@@ -1,42 +1,42 @@
 import { Type } from "@sinclair/typebox";
-import type { ConfigFS, FileFSConfigJS } from "./ConfigFS";
+import type { KfgFS, KfgFileFS } from "./kfg-fs";
 import type { SchemaOptions } from "./types";
 
 /**
  * A symbol used to identify a many-to-many relation in a schema.
  */
-export const CFS_MANY_SYMBOL = Symbol.for("ConfigFS.many");
+export const KFS_MANY_SYMBOL = Symbol.for("Kfg.many");
 /**
  * A symbol used to identify a one-to-one relation in a schema.
  */
-export const CFS_JOIN_SYMBOL = Symbol.for("ConfigFS.join");
+export const KFS_JOIN_SYMBOL = Symbol.for("Kfg.join");
 
 const _cfs = {
 	/**
 	 * Creates a many-to-many relation in a schema.
-	 * @param configFs The ConfigFS instance to relate to.
+	 * @param kfgFs The KfgFS instance to relate to.
 	 * @param options The schema options.
 	 */
-	many: <T extends ConfigFS<any, any>>(configFs: T, options?: SchemaOptions) =>
-		Type.Unsafe<FileFSConfigJS<T["driver"], T["schema"]>[]>(
+	many: <T extends KfgFS<any, any>>(kfgFs: T, options?: SchemaOptions) =>
+		Type.Unsafe<KfgFileFS<T["driver"], T["schema"]>[]>(
 			Type.Array(Type.String(), {
 				...options,
-				[CFS_MANY_SYMBOL]: {
-					configFs,
+				[KFS_MANY_SYMBOL]: {
+					kfgFs,
 				},
 			}),
 		),
-	join: <T extends ConfigFS<any, any>>(
-		configFs: T,
+	join: <T extends KfgFS<any, any>>(
+		kfgFs: T,
 		options?: SchemaOptions & { fk: string },
 	) =>
-		Type.Unsafe<FileFSConfigJS<T["driver"], T["schema"]>>(
+		Type.Unsafe<KfgFileFS<T["driver"], T["schema"]>>(
 			Type.Object(
 				{},
 				{
 					...options,
-					[CFS_JOIN_SYMBOL]: {
-						configFs,
+					[KFS_JOIN_SYMBOL]: {
+						kfgFs,
 						fk: options?.fk,
 					},
 				},
@@ -47,3 +47,4 @@ const _cfs = {
 export const cfs = {
 	..._cfs,
 };
+export const kfs = cfs;

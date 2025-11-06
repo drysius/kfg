@@ -2,7 +2,7 @@
 node_modules
 cjs
 esm
-ConfigJS.d.ts
+Kfg.d.ts
 config.json
 # output
 out

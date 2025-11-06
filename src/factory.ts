@@ -152,3 +152,4 @@ export const c = {
 	optional: _c.Optional,
 	random: _c.Random,
 };
+export const k = c;

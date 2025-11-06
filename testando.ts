@@ -1,8 +1,8 @@
-import { ConfigFS, ConfigJS, c, cfs, jsonDriver } from "./src/index";
+import { KfgFS, c, cfs, jsonDriver } from "./src/index";
 import * as path from "node:path";
 import * as fs from "node:fs";
 
-const licenças = new ConfigFS(jsonDriver, {
+const licenças = new KfgFS(jsonDriver, {
 	key:c.string(),
 	create_at:c.number(),
 	expire_in:c.number()
@@ -22,7 +22,7 @@ const teste = {
 	}),
 }
 
-const UserConfigFS = new ConfigFS(jsonDriver, teste, { only_importants:true });
+const UserConfigFS = new KfgFS(jsonDriver, teste, { only_importants:true });
 
 const perfil = {
     user_id:c.string(),
@@ -32,7 +32,7 @@ const perfil = {
     })
 }
 
-const PerfilConfigFS = new ConfigFS(jsonDriver,perfil, { only_importants:true })
+const PerfilConfigFS = new KfgFS(jsonDriver,perfil, { only_importants:true })
 
 // Inicializar o ConfigFS para Usuário, definindo como os caminhos dos arquivos serão gerados.
 UserConfigFS.init((id) =>
@@ -44,7 +44,7 @@ PerfilConfigFS.init((id) =>
 );
 
 async function runExample() {
-	console.log("Iniciando exemplo de ConfigFS...");
+	console.log("Iniciando exemplo de KfgFS...");
 
 	// Garantir que os diretórios de recursos existam
 	fs.mkdirSync(path.join(process.cwd(), "resources/inventory"), { recursive: true });

@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll, beforeEach } from 'bun:test';
 import { jsonDriver } from '../src/drivers/json-driver';
 import * as fs from 'fs';
 import * as path from 'path';
-import { ConfigJS } from '../src/ConfigJS';
+import { Kfg } from '../src/kfg';
 import { c } from '../src/factory';
 
 const TEST_JSON_PATH = path.join(__dirname, 'config.test.json');
@@ -22,7 +22,7 @@ describe('JSON Driver Integration', () => {
         const initialData = { app: { name: 'TestApp' } };
         fs.writeFileSync(TEST_JSON_PATH, JSON.stringify(initialData));
 
-        const config = new ConfigJS(jsonDriver, {
+        const config = new Kfg(jsonDriver, {
             app: { name: c.string() },
             db: { host: c.string({default: 'none'}) }
         });
@@ -42,7 +42,7 @@ describe('JSON Driver Integration', () => {
     // Verifies that the driver creates a new JSON file if one doesn't exist
     // when `set()` is called.
     it('should create a new file on set() if it does not exist', () => {
-        const config = new ConfigJS(jsonDriver, { user: { name: c.string({default: ''}) } });
+        const config = new Kfg(jsonDriver, { user: { name: c.string({default: ''}) } });
         config.load({ path: TEST_JSON_PATH }); // Load with empty config
         config.set('user.name', 'John');
 
@@ -56,21 +56,21 @@ describe('JSON Driver Integration', () => {
     // by falling back to the schema's default values.
     it('should apply defaults when the JSON file is invalid or malformed', () => {
         fs.writeFileSync(TEST_JSON_PATH, '{'); // Invalid JSON
-        const config = new ConfigJS(jsonDriver, { app: { name: c.string({default: 'DefaultApp'}) } });
+        const config = new Kfg(jsonDriver, { app: { name: c.string({default: 'DefaultApp'}) } });
         config.load({ path: TEST_JSON_PATH });
         expect(config.get('app.name')).toBe('DefaultApp');
     });
 
     // Confirms that schema defaults are used when the target config file does not exist.
     it('should apply defaults when the config file does not exist', () => {
-        const config = new ConfigJS(jsonDriver, { app: { name: c.string({default: 'abc'}) } });
+        const config = new Kfg(jsonDriver, { app: { name: c.string({default: 'abc'}) } });
         config.load({ path: TEST_JSON_PATH });
         expect(config.get('app.name')).toBe('abc');
     });
 
     // Tests the ability to correctly get and set values that are arrays.
     it('should correctly get and set array values', () => {
-        const config = new ConfigJS(jsonDriver, { data: { items: c.array(c.any(), {default: []}) } });
+        const config = new Kfg(jsonDriver, { data: { items: c.array(c.any(), {default: []}) } });
         config.load({ path: TEST_JSON_PATH });
         const anArray = ['item1', 'item2', { nested: true }];
         config.set('data.items', anArray);
@@ -88,7 +88,7 @@ describe('JSON Driver Integration', () => {
         const schema = {
             a: { b: { c: c.string({ default: 'c' }), d: c.number({ default: 1 }) } }
         };
-        const config = new ConfigJS(jsonDriver, schema);
+        const config = new Kfg(jsonDriver, schema);
         config.load({ path: TEST_JSON_PATH });
 
         config.set('a.b.c', 'new-c');
@@ -110,7 +110,7 @@ describe('JSON Driver Integration', () => {
         const schema = {
             app: { port: c.number() }
         };
-        const config = new ConfigJS(jsonDriver, schema);
+        const config = new Kfg(jsonDriver, schema);
         config.load({ path: TEST_JSON_PATH });
 
         expect(config.get('app.port')).toBe(8080);
@@ -134,7 +134,7 @@ describe('JSON Driver Integration', () => {
                 }
             }
         };
-        const config = new ConfigJS(jsonDriver, schema);
+        const config = new Kfg(jsonDriver, schema);
         config.load({ path: TEST_JSON_PATH });
 
         config.insert('app.server', { port: 8080 });
@@ -151,7 +151,7 @@ describe('JSON Driver Integration', () => {
     // as if the file did not exist.
     it('should apply defaults when the JSON file is empty', () => {
         fs.writeFileSync(TEST_JSON_PATH, ''); // Empty file
-        const config = new ConfigJS(jsonDriver, { app: { name: c.string({default: 'DefaultApp'}) } });
+        const config = new Kfg(jsonDriver, { app: { name: c.string({default: 'DefaultApp'}) } });
         config.load({ path: TEST_JSON_PATH });
         expect(config.get('app.name')).toBe('DefaultApp');
     });
@@ -165,7 +165,7 @@ describe('JSON Driver Integration', () => {
                 port: c.optional(c.number())
             }
         };
-        const config = new ConfigJS(jsonDriver, schema);
+        const config = new Kfg(jsonDriver, schema);
         config.load({ path: TEST_JSON_PATH, keyroot: false });
 
         config.set('app.port', 8080, { description: 'The application port' });
@@ -181,7 +181,7 @@ describe('JSON Driver Integration', () => {
         });
 
         // Test loading
-        const config2 = new ConfigJS(jsonDriver, schema);
+        const config2 = new Kfg(jsonDriver, schema);
         config2.load({ path: TEST_JSON_PATH, keyroot: false });
         expect(config2.get('app.port')).toBe(8080);
         expect(config2.root('app')).toEqual({ port: 8080 }); // Ensure comment is not in config data
@@ -196,7 +196,7 @@ describe('JSON Driver Integration', () => {
                 host: c.string({ default: 'localhost' })
             }
         };
-        const config = new ConfigJS(jsonDriver, schema);
+        const config = new Kfg(jsonDriver, schema);
         config.load({ path: TEST_JSON_PATH, keyroot: true });
 
         config.set('app.port', 8080, { description: 'The application port' });
@@ -214,7 +214,7 @@ describe('JSON Driver Integration', () => {
         expect(parsed.app).toBeUndefined();
 
         // Test that loading the flattened file works correctly
-        const config2 = new ConfigJS(jsonDriver, schema);
+        const config2 = new Kfg(jsonDriver, schema);
         config2.load({ path: TEST_JSON_PATH, keyroot: true });
         // Check that the values are correctly unflattened and accessible
         expect(config2.get('app.port')).toBe(8080);
@@ -229,10 +229,10 @@ describe('JSON Driver Integration', () => {
         const initialData = { app: { port: 3000 } };
         fs.writeFileSync(TEST_JSON_PATH, JSON.stringify(initialData));
         const schema = { app: { port: c.number() } };
-        const config = new ConfigJS(jsonDriver, schema);
+        const config = new Kfg(jsonDriver, schema);
         config.load({ path: TEST_JSON_PATH });
 
-        expect(() => config.insert('app.port', { a: 1 } as any)).toThrow('Cannot insert into non-object at path: app.port');
+        expect(() => config.insert('app.port' as any, { a: 1 } as any)).toThrow('Cannot insert into non-object at path: app.port');
     });
 
     // Confirms that `set` throws an error if it tries to create a property
@@ -241,7 +241,7 @@ describe('JSON Driver Integration', () => {
         const initialData = { app: { port: 3000 } };
         fs.writeFileSync(TEST_JSON_PATH, JSON.stringify(initialData));
         const schema = { app: { port: c.any() } };
-        const config = new ConfigJS(jsonDriver, schema);
+        const config = new Kfg(jsonDriver, schema);
         config.load({ path: TEST_JSON_PATH });
 
         expect(() => config.set('app.port.host' as any, 'localhost')).toThrow('Cannot set property on non-object at path: port');
@@ -253,7 +253,7 @@ describe('JSON Driver Integration', () => {
         const initialData = { app: { port: 'not-a-number' } };
         fs.writeFileSync(TEST_JSON_PATH, JSON.stringify(initialData));
         const schema = { app: { port: c.number() } };
-        const config = new ConfigJS(jsonDriver, schema);
+        const config = new Kfg(jsonDriver, schema);
         
         expect(() => config.load({ path: TEST_JSON_PATH })).toThrow(/Validation failed/);
     });
@@ -262,7 +262,7 @@ describe('JSON Driver Integration', () => {
     // data and does not include any comment metadata.
     it('should not include comment properties in root() object', () => {
         const schema = { app: { port: c.optional(c.number()) } };
-        const config = new ConfigJS(jsonDriver, schema);
+        const config = new Kfg(jsonDriver, schema);
         config.load({ path: TEST_JSON_PATH });
 
         config.set('app.port', 8080, { description: 'The application port' });

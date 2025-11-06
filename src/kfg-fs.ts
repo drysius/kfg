@@ -1,7 +1,6 @@
 import * as fs from "node:fs";
-import { ConfigJS } from "./ConfigJS";
-import type { ConfigJSDriver } from "./driver";
-import { CFS_JOIN_SYMBOL, CFS_MANY_SYMBOL } from "./fs-factory";
+import { Kfg } from "./kfg";
+import { KFS_JOIN_SYMBOL, KFS_MANY_SYMBOL } from "./fs-factory";
 import type {
 	DeepGet,
 	inPromise,
@@ -11,20 +10,21 @@ import type {
 	StaticSchema,
 	StaticSchemaWithRelation,
 } from "./types";
+import { KfgDriver } from "./kfg-driver";
 
 /**
- * Represents a file-based configuration that extends the base ConfigJS class.
+ * Represents a file-based configuration that extends the base Kfg class.
  * It is used to manage a single configuration file.
  * @template D The type of the driver.
  * @template S The type of the schema.
  */
 //@ts-ignore more recursive types, ignore
-export class FileFSConfigJS<
-	D extends ConfigJSDriver<any, any, any>,
+export class KfgFileFS<
+	D extends KfgDriver<any, any, any>,
 	S extends SchemaDefinition,
-> extends ConfigJS<D, S> {
+> extends Kfg<D, S> {
 	/**
-	 * Creates a new instance of FileFSConfigJS.
+	 * Creates a new instance of KfgFileFS.
 	 * @param driver The driver to use for loading and saving the configuration.
 	 * @param schema The schema to use for validating the configuration.
 	 * @param filePath The path to the configuration file.
@@ -52,7 +52,7 @@ export class FileFSConfigJS<
 	 * @param value The new value.
 	 * @param options The options for setting the value.
 	 */
-	//@ts-ignore configfs change internal logic of configjs, ignore this
+	//@ts-ignore KfgFS change internal logic of Kfg, ignore this
 	public override set<P extends Paths<StaticSchema<S>>>(
 		path: P,
 		value: StaticSchemaWithRelation<DeepGet<StaticSchema<S>, P>>,
@@ -66,7 +66,7 @@ export class FileFSConfigJS<
 	 * @param path The path to the object.
 	 * @param partial The partial value to insert.
 	 */
-	//@ts-ignore configfs change internal logic of configjs, ignore this
+	//@ts-ignore KfgFS change internal logic of Kfg, ignore this
 	public override insert<P extends Paths<StaticSchema<S>>>(
 		path: P,
 		value: Partial<StaticSchemaWithRelation<DeepGet<StaticSchema<S>, P>>>,
@@ -80,7 +80,7 @@ export class FileFSConfigJS<
 	 * @param path The path to the value.
 	 * @returns The value at the given path.
 	 */
-	//@ts-ignore configfs change internal logic of configjs, ignore this
+	//@ts-ignore KfgFS change internal logic of Kfg, ignore this
 	public override root<P extends Paths<StaticSchema<S>>>(
 		path: P,
 	): inPromise<
@@ -141,10 +141,10 @@ export class FileFSConfigJS<
 		path: P,
 	): inPromise<D["async"], DeepGet<StaticSchema<S>, P> | undefined> {
 		const schema = this.conf(path as any) as any;
-		const manyInfo = (schema as any)[CFS_MANY_SYMBOL];
+		const manyInfo = (schema as any)[KFS_MANY_SYMBOL];
 
 		if (!manyInfo) {
-			throw new Error(`[ConfigFS] '${path}' is not a many-relation field.`);
+			throw new Error(`[KfgFS] '${path}' is not a many-relation field.`);
 		}
 
 		const ids = this.get(path as any) as unknown as string[];
@@ -153,8 +153,8 @@ export class FileFSConfigJS<
 			return undefined as any;
 		}
 
-		const relatedConfigFS = manyInfo.configFs;
-		const files = ids.map((id) => relatedConfigFS.file(id));
+		const related = manyInfo.kfgFs;
+		const files = ids.map((id) => related.file(id));
 
 		if (this.driver.async) {
 			return Promise.all(files) as any;
@@ -170,12 +170,12 @@ export class FileFSConfigJS<
 	 */
 	public getJoin<P extends RelationPaths<S>>(
 		path: P,
-	): inPromise<D["async"], FileFSConfigJS<any, any> | undefined> {
+	): inPromise<D["async"], KfgFileFS<any, any> | undefined> {
 		const schema = this.conf(path as any) as any;
-		const joinInfo = (schema as any)[CFS_JOIN_SYMBOL];
+		const joinInfo = (schema as any)[KFS_JOIN_SYMBOL];
 
 		if (!joinInfo) {
-			throw new Error(`[ConfigFS] '${path}' is not a join-relation field.`);
+			throw new Error(`[KfgFS] '${path}' is not a join-relation field.`);
 		}
 
 		const fkValue = this.get(joinInfo.fk as any) as unknown as string;
@@ -184,11 +184,11 @@ export class FileFSConfigJS<
 			return undefined as any;
 		}
 
-		const relatedConfigFS = joinInfo.configFs;
-		const fileInstance = relatedConfigFS.file(fkValue);
+		const related = joinInfo.kfgFs;
+		const instance = related.file(fkValue);
 
 		if (this.driver.async) {
-			return (fileInstance as Promise<FileFSConfigJS<any, any>>).then(
+			return (instance as Promise<KfgFileFS<any, any>>).then(
 				async (instance) => {
 					await instance.load();
 					return instance;
@@ -196,7 +196,7 @@ export class FileFSConfigJS<
 			) as any;
 		}
 
-		const loadedInstance = fileInstance as FileFSConfigJS<any, any>;
+		const loadedInstance = instance as KfgFileFS<any, any>;
 		loadedInstance.load();
 		return loadedInstance as any;
 	}
@@ -214,14 +214,14 @@ export class FileFSConfigJS<
  * @template D The type of the driver.
  * @template S The type of the schema.
  */
-export class ConfigFS<
-	D extends ConfigJSDriver<any, any, any>,
+export class KfgFS<
+	D extends KfgDriver<any, any, any>,
 	S extends SchemaDefinition,
 > {
 	private pathFn?: (id: string) => string;
 
 	/**
-	 * Creates a new instance of ConfigFS.
+	 * Creates a new instance of KfgFS.
 	 * @param driver The driver to use for loading and saving the configurations.
 	 * @param schema The schema to use for validating the configurations.
 	 * @param config The configuration options.
@@ -240,7 +240,7 @@ export class ConfigFS<
 	) {}
 
 	/**
-	 * Initializes the ConfigFS instance with a path function.
+	 * Initializes the KfgFS instance with a path function.
 	 * @param pathFn A function that returns the file path for a given ID.
 	 */
 	public init(pathFn: (id: string) => string) {
@@ -255,7 +255,7 @@ export class ConfigFS<
 	private getPath(id: string): string {
 		if (!this.pathFn) {
 			throw new Error(
-				"[ConfigFS] ConfigFS not initialized. Call init() first.",
+				"[KfgFS] KfgFS not initialized. Call init() first.",
 			);
 		}
 		return this.pathFn(id);
@@ -264,23 +264,23 @@ export class ConfigFS<
 	/**
 	 * Gets a file-based configuration for a given ID.
 	 * @param id The ID of the configuration file.
-	 * @returns A FileFSConfigJS instance.
+	 * @returns A KfgFileFS instance.
 	 */
-	public file(id: string): inPromise<D["async"], FileFSConfigJS<D, S>> {
+	public file(id: string): inPromise<D["async"], KfgFileFS<D, S>> {
 		const filePath = this.getPath(id);
 		const newDriver = new (this.driver.constructor as any)(
 			this.driver.options,
 		) as D;
-		const fileInstance = new FileFSConfigJS(newDriver, this.schema, filePath);
+		const fileInstance = new KfgFileFS(newDriver, this.schema, filePath);
 
 		const loadResult = fileInstance.load(this.config);
 
 		if (this.driver.async) {
 			return (loadResult as Promise<void>).then(
 				() => fileInstance,
-			) as inPromise<D["async"], FileFSConfigJS<D, S>>;
+			) as inPromise<D["async"], KfgFileFS<D, S>>;
 		}
-		return fileInstance as inPromise<D["async"], FileFSConfigJS<D, S>>;
+		return fileInstance as inPromise<D["async"], KfgFileFS<D, S>>;
 	}
 
 	/**

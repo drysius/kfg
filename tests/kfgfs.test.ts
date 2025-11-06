@@ -2,15 +2,14 @@ import { describe, it, expect, afterAll, beforeEach } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as fsp from 'node:fs/promises';
-import { ConfigFS, c, cfs, jsonDriver } from '../src/index';
-import { Type } from '@sinclair/typebox';
+import { KfgFS, c, cfs, jsonDriver } from '../src/index';
 
-const TEST_DIR = path.join(__dirname, 'configfs-test-files');
+const TEST_DIR = path.join(__dirname, 'Kfg-test-files');
 const USER_DIR = path.join(TEST_DIR, 'users');
 const INVENTORY_DIR = path.join(TEST_DIR, 'inventory');
 
-// 1. Define o ConfigFS para Inventário
-const InventoryConfigFS = new ConfigFS(jsonDriver, {
+// 1. Define o Kfg para Inventário
+const InventoryKfgFS = new KfgFS(jsonDriver, {
     item: c.array(c.string(), { default: [], description: "Lista de itens no inventário" }),
     location: c.string({ default: "warehouse", description: "Localização do inventário" }),
 }, { only_importants: true });
@@ -19,7 +18,7 @@ const UserSchema = {
     name: c.string({ default: "New User", description: "Nome do usuário" }),
     age: c.number({ default: 18, description: "Idade do usuário" }),
     is_active: c.boolean({ default: true, description: "Status de atividade do usuário" }),
-    inventory_ids: cfs.many(InventoryConfigFS, {
+    inventory_ids: cfs.many(InventoryKfgFS, {
         default: [],
         description: "Lista de IDs de inventário pertencentes ao usuário",
     }),
@@ -29,19 +28,19 @@ const UserSchema = {
     },
 };
 
-const UserConfigFS = new ConfigFS(jsonDriver, UserSchema, { only_importants: true });
+const UserKfg = new KfgFS(jsonDriver, UserSchema, { only_importants: true });
 
 const USER_PROFILE_DIR = path.join(TEST_DIR, 'user-profiles');
 
 const UserProfileSchema = {
     user_id: c.string({ description: "ID do usuário" }),
     bio: c.string({ default: "", description: "Biografia do usuário" }),
-    user: cfs.join(UserConfigFS, { fk: 'user_id' }),
+    user: cfs.join(UserKfg, { fk: 'user_id' }),
 };
 
-const UserProfileConfigFS = new ConfigFS(jsonDriver, UserProfileSchema, { only_importants: true });
+const UserProfileKfg = new KfgFS(jsonDriver, UserProfileSchema, { only_importants: true });
 
-describe('ConfigFS v2', () => {
+describe('Kfg v2', () => {
     beforeEach(async () => {
         if (fs.existsSync(TEST_DIR)) {
             await fsp.rm(TEST_DIR, { recursive: true, force: true });
@@ -49,9 +48,9 @@ describe('ConfigFS v2', () => {
         fs.mkdirSync(USER_DIR, { recursive: true });
         fs.mkdirSync(INVENTORY_DIR, { recursive: true });
         fs.mkdirSync(USER_PROFILE_DIR, { recursive: true });
-        InventoryConfigFS.init((id) => path.join(INVENTORY_DIR, `${id}.json`));
-        UserConfigFS.init((id) => path.join(USER_DIR, `${id}.json`));
-        UserProfileConfigFS.init((id) => path.join(USER_PROFILE_DIR, `${id}.json`));
+        InventoryKfgFS.init((id) => path.join(INVENTORY_DIR, `${id}.json`));
+        UserKfg.init((id) => path.join(USER_DIR, `${id}.json`));
+        UserProfileKfg.init((id) => path.join(USER_PROFILE_DIR, `${id}.json`));
     });
 
     afterAll(async () => {
@@ -61,11 +60,11 @@ describe('ConfigFS v2', () => {
     });
 
     it('should create and manage inventory items', async () => {
-        const inv1 = InventoryConfigFS.file("inv-1");
+        const inv1 = InventoryKfgFS.file("inv-1");
         inv1.set("item", ["espada", "escudo"]);
         inv1.set("location", "arsenal");
 
-        const inv2 = InventoryConfigFS.file("inv-2");
+        const inv2 = InventoryKfgFS.file("inv-2");
         inv2.set("item", ["poção", "pergaminho"]);
 
         const inv1Data = await inv1.toJSON();
@@ -78,7 +77,7 @@ describe('ConfigFS v2', () => {
     });
 
     it('should create and manage a user with relationships', async () => {
-        const user1 = UserConfigFS.file("user-123");
+        const user1 = UserKfg.file("user-123");
         user1.set("name", "Alice");
         user1.set("age", 30);
         user1.set("is_active", true);
@@ -93,14 +92,14 @@ describe('ConfigFS v2', () => {
 
     it('should access related inventories using getMany', async () => {
         // Create inventories first
-        const inv1 = InventoryConfigFS.file("inv-1");
+        const inv1 = InventoryKfgFS.file("inv-1");
         inv1.set("item", ["espada", "escudo"]);
 
-        const inv2 = InventoryConfigFS.file("inv-2");
+        const inv2 = InventoryKfgFS.file("inv-2");
         inv2.set("item", ["poção", "pergaminho"]);
 
         // Create user and link inventories
-        const user1 = UserConfigFS.file("user-123");
+        const user1 = UserKfg.file("user-123");
         user1.set("inventory_ids", ["inv-1", "inv-2"]);
 
         const user1Inventories = await user1.getMany("inventory_ids");
@@ -115,7 +114,7 @@ describe('ConfigFS v2', () => {
     });
 
     it('should get, has, and insert data', async () => {
-        const userFile = UserConfigFS.file('user-1');
+        const userFile = UserKfg.file('user-1');
         //console.log(userFile)
         // Test get
         expect(userFile.get('name')).toBe('New User');
@@ -138,32 +137,32 @@ describe('ConfigFS v2', () => {
         expect(data.address.street).toBe('123 Main St');
     });
 
-    it('should demonstrate other ConfigFS manager methods', async () => {
+    it('should demonstrate other Kfg manager methods', async () => {
         // Create a user to be copied and deleted
-        const user1 = UserConfigFS.file("user-123");
+        const user1 = UserKfg.file("user-123");
         user1.set("name", "Alice");
 
         // Copy user-123 to user-456
-        UserConfigFS.copy("user-123", "user-456");
-        const user2 = UserConfigFS.file("user-456");
+        UserKfg.copy("user-123", "user-456");
+        const user2 = UserKfg.file("user-456");
         const user2Data = await user2.toJSON();
         expect(user2Data.name).toBe("Alice");
 
         // Delete user-123
-        UserConfigFS.del("user-123");
+        UserKfg.del("user-123");
         expect(fs.existsSync(user1.filePath)).toBe(false); // Check if file is deleted
-        const deletedUser = UserConfigFS.file("user-123");
+        const deletedUser = UserKfg.file("user-123");
         const deletedUserData = await deletedUser.toJSON();
         expect(deletedUserData.name).toBe("New User"); // Should be default value
     });
 
     it('should create and manage a user profile with a joined user', async () => {
-        const user1 = UserConfigFS.file("user-123");
+        const user1 = UserKfg.file("user-123");
         user1.set("name", "Alice");
         user1.set("age", 30);
         await user1.save();
 
-        const userProfile1 = UserProfileConfigFS.file("profile-456");
+        const userProfile1 = UserProfileKfg.file("profile-456");
         userProfile1.set("user_id", "user-123");
         userProfile1.set("bio", "Software Engineer");
         await userProfile1.save();

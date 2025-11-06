@@ -1,4 +1,4 @@
-import type { ConfigJSDriver } from "./driver";
+import type { KfgDriver } from "./kfg-driver";
 import type {
 	DeepGet,
 	inPromise,
@@ -11,12 +11,12 @@ import { getProperty } from "./utils/object";
 import { makeSchemaOptional } from "./utils/schema";
 
 /**
- * The main class for ConfigJS. It is responsible for loading and managing the configuration.
+ * The main class for Kfg. It is responsible for loading and managing the configuration.
  * @template D The type of the driver.
  * @template S The type of the schema.
  */
-export class ConfigJS<
-	D extends ConfigJSDriver<any, any, any>,
+export class Kfg<
+	D extends KfgDriver<any, any, any>,
 	S extends SchemaDefinition,
 > {
 	public driver: D;
@@ -24,7 +24,7 @@ export class ConfigJS<
 	private loaded = false;
 
 	/**
-	 * Creates a new instance of ConfigJS.
+	 * Creates a new instance of Kfg.
 	 * @param driver The driver to use for loading and saving the configuration.
 	 * @param schema The schema to use for validating the configuration.
 	 */
@@ -68,7 +68,7 @@ export class ConfigJS<
 	 */
 	public get<P extends Paths<StaticSchema<S>>>(path: P) {
 		if (!this.loaded) {
-			throw new Error("[ConfigJS] Config not loaded. Call load() first.");
+			throw new Error("[Kfg] Config not loaded. Call load() first.");
 		}
 		return this.driver.get(path) as inPromise<
 			D["async"],
@@ -83,7 +83,7 @@ export class ConfigJS<
 	 */
 	public has<P extends Paths<StaticSchema<S>>>(...paths: P[]) {
 		if (!this.loaded) {
-			throw new Error("[ConfigJS] Config not loaded. Call load() first.");
+			throw new Error("[Kfg] Config not loaded. Call load() first.");
 		}
 		return this.driver.has(...paths) as inPromise<D["async"], boolean>;
 	}
@@ -95,7 +95,7 @@ export class ConfigJS<
 	 */
 	public root<P extends RootPaths<StaticSchema<S>>>(path: P) {
 		if (!this.loaded) {
-			throw new Error("[ConfigJS] Config not loaded. Call load() first.");
+			throw new Error("[Kfg] Config not loaded. Call load() first.");
 		}
 		return this.driver.get(path) as inPromise<
 			D["async"],
@@ -115,7 +115,7 @@ export class ConfigJS<
 		options?: { description?: string },
 	) {
 		if (!this.loaded) {
-			throw new Error("[ConfigJS] Config not loaded. Call load() first.");
+			throw new Error("[Kfg] Config not loaded. Call load() first.");
 		}
 		return this.driver.set(path, value, options) as inPromise<D["async"], void>;
 	}
@@ -130,7 +130,7 @@ export class ConfigJS<
 		partial: Partial<DeepGet<StaticSchema<S>, P>>,
 	) {
 		if (!this.loaded) {
-			throw new Error("[ConfigJS] Config not loaded. Call load() first.");
+			throw new Error("[Kfg] Config not loaded. Call load() first.");
 		}
 		return this.driver.insert(path, partial) as inPromise<D["async"], void>;
 	}
@@ -141,7 +141,7 @@ export class ConfigJS<
 	 */
 	public del<P extends Paths<StaticSchema<S>>>(path: P) {
 		if (!this.loaded) {
-			throw new Error("[ConfigJS] Config not loaded. Call load() first.");
+			throw new Error("[Kfg] Config not loaded. Call load() first.");
 		}
 		return this.driver.del(path) as inPromise<D["async"], void>;
 	}
@@ -153,7 +153,7 @@ export class ConfigJS<
 	 */
 	public conf<P extends Paths<StaticSchema<S>>>(path: P) {
 		if (!this.loaded) {
-			throw new Error("[ConfigJS] Config not loaded. Call load() first.");
+			throw new Error("[Kfg] Config not loaded. Call load() first.");
 		}
 		return getProperty(this.schema, path as string) as DeepGet<S, P>;
 	}
@@ -164,7 +164,7 @@ export class ConfigJS<
 	 */
 	public async toJSON() {
 		if (!this.loaded) {
-			throw new Error("[ConfigJS] Config not loaded. Call load() first.");
+			throw new Error("[Kfg] Config not loaded. Call load() first.");
 		}
 		if (this.driver.async) {
 			return Promise.resolve(this.driver.data) as inPromise<

@@ -1,32 +1,33 @@
-# ConfigJS - Simple, Type-Safe Configuration Management
+# K(con)fg - Simple, Type-Safe Configuration Management
 
-[![npm version](https://badge.fury.io/js/%40caeljs%2Fconfig.svg)](https://badge.fury.io/js/%40caeljs%2Fconfig)
-[![Documentation](https://github.com/drylian/configjs/actions/workflows/docs.yml/badge.svg)](https://drylian.github.io/configjs/)
+[![npm version](https://badge.fury.io/js/kfg.svg)](https://badge.fury.io/js/kfg)
+[![Documentation](https://github.com/drylian/kfg/actions/workflows/docs.yml/badge.svg)](https://kfg.drylian.com/)
 
-ConfigJS is a robust and 100% type-safe configuration management system for Node.js and Bun applications. It provides a structured way to define, validate, and access environment variables and other configuration sources with the power of TypeScript.
+Kfg is a robust and 100% type-safe configuration management system for Node.js and Bun applications. It provides a structured way to define, validate, and access environment variables and other configuration sources with the power of TypeScript.
 
 - ✅ **Fully Typed**: Autocomplete and type safety for all your configurations.
 - ✅ **Flexible Drivers**: Load configurations from `.env` files, JSON, or create your own driver.
 - ✅ **Built-in Validation**: Define rules and formats (email, url, etc.) directly in the schema.
 - ✅ **Smart Defaults**: Define defaults that are applied automatically.
 - ✅ **Nested Structures**: Organize your configurations logically.
-- ✅ **File-based Configuration**: Manage configurations across multiple files with `ConfigFS`.
+- ✅ **File-based Configuration**: Manage configurations across multiple files with `Kfg`.
+
 - ✅ **Relations**: Create one-to-one and one-to-many relations between configurations.
 
---- 
+---
 
 ## 📖 Documentation
 
-- **[Full Usage Guide](https://drylian.github.io/configjs/)**: Learn how to install and use ConfigJS.
+- **[Full Usage Guide](https://kfg.drylian.com/)**: Learn how to install and use Kfg.
 
 ## Installation
 
 ```bash
-npm install @caeljs/config
+npm install kfg
 # or
-yarn add @caeljs/config
+yarn add kfg
 # or
-bun add @caeljs/config
+bun add kfg
 ```
 
 ## Quick Example
@@ -34,7 +35,7 @@ bun add @caeljs/config
 **1. Define your schema (`schema.ts`):**
 
 ```typescript
-import { c } from "@caeljs/config";
+import { c } from "kfg";
 
 export const AppSchema = {
   server: {
@@ -50,11 +51,11 @@ export const AppSchema = {
 **2. Create and load your instance (`config.ts`):**
 
 ```typescript
-import { ConfigJS } from "@caeljs/config";
-import { envDriver } from "@caeljs/config/drivers";
+import { Kfg } from "kfg";
+import { envDriver } from "kfg/drivers";
 import { AppSchema } from "./schema";
 
-const config = new ConfigJS(envDriver, AppSchema);
+const config = new Kfg(envDriver, AppSchema);
 config.load(); // Loads values from .env and process.env
 
 export default config;
@@ -74,26 +75,26 @@ console.log(`Server running on port ${port}`);
 // config.set("server.port", "not-a-number");
 ```
 
-## File-based Configuration with `ConfigFS`
+## File-based Configuration with `Kfg`
 
-`ConfigFS` allows you to manage configurations across multiple files, which is useful for managing configurations for different users, tenants, or environments.
+`Kfg` allows you to manage configurations across multiple files, which is useful for managing configurations for different users, tenants, or environments.
 
 **1. Define your schemas:**
 
 ```typescript
-import { ConfigFS, c, cfs, jsonDriver } from "@caeljs/config";
+import { Kfg, c, cfs, jsonDriver } from "kfg";
 
-const inventory = new ConfigFS(jsonDriver, {
+const inventory = new Kfg(jsonDriver, {
     items: c.array(c.string()),
 });
 
-const user = new ConfigFS(jsonDriver, {
+const user = new Kfg(jsonDriver, {
     name: c.string(),
     inventory_ids: cfs.many(inventory),
 });
 ```
 
-**2. Initialize `ConfigFS`:**
+**2. Initialize `Kfg`:**
 
 ```typescript
 inventory.init((id) => `resources/inventory/${id}.json`);

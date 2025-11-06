@@ -1,13 +1,13 @@
 import { describe, it, expect, afterEach, beforeEach } from "bun:test";
-import { ConfigJS } from "../src/ConfigJS";
+import { Kfg } from "../src/kfg";
 import { c } from "../src/factory";
 import { envDriver } from "../src/drivers/env-driver";
 import * as fs from "fs";
 import * as path from "path";
 
-const TEST_ENV_PATH = path.join(__dirname, ".env.configjs.test");
+const TEST_ENV_PATH = path.join(__dirname, ".env.kfg.test");
 
-describe("ConfigJS Core Functionality with EnvDriver", () => {
+describe("Kfg Core Functionality with EnvDriver", () => {
 	beforeEach(() => {
 		// Clean up the test .env file and process.env variables before each test
 		if (fs.existsSync(TEST_ENV_PATH)) {
@@ -34,7 +34,7 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 			},
 		};
 
-		const config = new ConfigJS(envDriver, schema);
+		const config = new Kfg(envDriver, schema);
 		config.load({ path: TEST_ENV_PATH });
 
 		const token = config.get("dc.token");
@@ -51,7 +51,7 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 			},
 		};
 
-		const config = new ConfigJS(envDriver, schema);
+		const config = new Kfg(envDriver, schema);
 		config.load({ path: TEST_ENV_PATH });
 
 		expect(config.get("dc.token")).toBe("custom_prop_token");
@@ -66,7 +66,7 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 			},
 		};
 
-		const config = new ConfigJS(envDriver, schema);
+		const config = new Kfg(envDriver, schema);
 		config.load({ path: TEST_ENV_PATH });
 
 		expect(config.get("dc.token")).toBe("default_token");
@@ -86,7 +86,7 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 			},
 		};
 
-		const config = new ConfigJS(envDriver, schema);
+		const config = new Kfg(envDriver, schema);
 		config.load({ path: TEST_ENV_PATH });
 
 		const app = config.root("app");
@@ -107,7 +107,7 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 			},
 		};
 
-		const config = new ConfigJS(envDriver, schema);
+		const config = new Kfg(envDriver, schema);
 		config.load({ path: TEST_ENV_PATH });
 
 		expect(config.get("dc.token")).toBe("file_token");
@@ -121,7 +121,7 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 				port: c.number({ default: 8080 }),
 			},
 		};
-		const config = new ConfigJS(envDriver, schema);
+		const config = new Kfg(envDriver, schema);
 		config.load({ path: TEST_ENV_PATH });
 
 		config.set("app.port", 9999);
@@ -143,7 +143,7 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 			},
 		};
 
-		const config = new ConfigJS(envDriver, schema);
+		const config = new Kfg(envDriver, schema);
 		config.load({ path: TEST_ENV_PATH });
 
 		expect(config.has("app.port")).toBe(true);
@@ -157,8 +157,8 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 	// Ensures that attempting to access configuration values before
 	// the configuration has been loaded results in a thrown error.
     it('should throw an error if get() is called before load()', () => {
-        const config = new ConfigJS(envDriver, {});
-        expect(() => config.get('any.path' as never)).toThrow('[ConfigJS] Config not loaded. Call load() first.');
+        const config = new Kfg(envDriver, {});
+        expect(() => config.get('any.path' as never)).toThrow('[Kfg] Config not loaded. Call load() first.');
     });
 
 	// Validates the `only_importants` feature, ensuring that validation is
@@ -175,21 +175,21 @@ describe("ConfigJS Core Functionality with EnvDriver", () => {
 			}
 		};
 
-		const configFail = new ConfigJS(envDriver, schema);
+		const configFail = new Kfg(envDriver, schema);
 		expect(() => configFail.load({ path: TEST_ENV_PATH })).toThrow();
 
 		fs.writeFileSync(TEST_ENV_PATH, 'APP_VERSION=1.0.0');
 
-		const configFail2 = new ConfigJS(envDriver, schema);
+		const configFail2 = new Kfg(envDriver, schema);
 		expect(() => configFail2.load({ path: TEST_ENV_PATH })).toThrow();
 
-		const configSuccess = new ConfigJS(envDriver, schema);
+		const configSuccess = new Kfg(envDriver, schema);
 		configSuccess.load({ path: TEST_ENV_PATH, only_importants: true });
 		expect(configSuccess.get('app.version')).toBe('1.0.0');
 		expect(configSuccess.has('app.name')).toBe(false);
 
 		if (fs.existsSync(TEST_ENV_PATH)) fs.unlinkSync(TEST_ENV_PATH);
-		const configFailImportant = new ConfigJS(envDriver, schema);
+		const configFailImportant = new Kfg(envDriver, schema);
 		expect(() => configFailImportant.load({ path: TEST_ENV_PATH, only_importants: true })).toThrow();
 	});
 });

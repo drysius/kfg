@@ -7,8 +7,8 @@ import type {
 } from "@sinclair/typebox";
 export type { TSchema, TObject, SchemaOptions };
 
-import type { FileFSConfigJS } from "./ConfigFS";
-import type { ConfigJSDriver } from "./driver";
+import type { KfgDriver } from "./kfg-driver";
+import { KfgFileFS } from "./kfg-fs";
 
 // --- Driver Related Types ---
 
@@ -86,7 +86,7 @@ export type DriverOnLoad<
 	S extends DriverStore,
 	A extends boolean,
 > = (
-	this: ConfigJSDriver<C, S, A>,
+	this: KfgDriver<C, S, A>,
 	schema: SchemaDefinition,
 	opts: Partial<C>,
 ) => inPromise<A, any>;
@@ -101,7 +101,7 @@ export type DriverOnSet<
 	S extends DriverStore,
 	A extends boolean,
 > = (
-	this: ConfigJSDriver<C, S, A>,
+	this: KfgDriver<C, S, A>,
 	key: string,
 	value: unknown,
 	options?: { description?: string },
@@ -117,7 +117,7 @@ export type DriverOnDel<
 	C extends DriverConfig,
 	S extends DriverStore,
 	A extends boolean,
-> = (this: ConfigJSDriver<C, S, A>, key: string) => inPromise<A, void>;
+> = (this: KfgDriver<C, S, A>, key: string) => inPromise<A, void>;
 
 /**
  * Represents the options of a driver.
@@ -125,7 +125,7 @@ export type DriverOnDel<
  * @template S The type of the driver store.
  * @template A The type of the async flag.
  */
-export interface ConfigJSDriverOptions<
+export interface KfgDriverOptions<
 	C extends DriverConfig,
 	S extends DriverStore,
 	A extends boolean,
@@ -148,9 +148,9 @@ export interface ConfigJSDriverOptions<
 export type StaticSchemaWithRelation<S> = S extends TSchema
 	? StaticSchema<S>
 	: {
-			[K in keyof S]: S[K] extends FileFSConfigJS<any, any>
+			[K in keyof S]: S[K] extends KfgFileFS<any, any>
 				? string
-				: S[K] extends FileFSConfigJS<any, any>[]
+				: S[K] extends KfgFileFS<any, any>[]
 					? string[]
 					: StaticSchemaWithRelation<S[K]>;
 		};
@@ -163,8 +163,8 @@ export type RelationPaths<S extends SchemaDefinition> = S extends TSchema
 	? never
 	: {
 			[K in keyof S]: S[K] extends
-				| TUnsafe<FileFSConfigJS<any, any>>
-				| TUnsafe<FileFSConfigJS<any, any>[]>
+				| TUnsafe<KfgFileFS<any, any>>
+				| TUnsafe<KfgFileFS<any, any>[]>
 				? K
 				: S[K] extends SchemaDefinition
 					? `${K & string}.${RelationPaths<S[K]>}`

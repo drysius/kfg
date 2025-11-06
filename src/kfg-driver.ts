@@ -1,7 +1,7 @@
 import type { TObject } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import type {
-	ConfigJSDriverOptions,
+	KfgDriverOptions,
 	DeepGet,
 	DriverConfig,
 	DriverStore,
@@ -29,7 +29,7 @@ import {
  * @template S The type of the driver store.
  * @template Async The type of the async flag.
  */
-export class ConfigJSDriver<
+export class KfgDriver< 
 	C extends DriverConfig,
 	S extends DriverStore,
 	Async extends boolean,
@@ -47,7 +47,7 @@ export class ConfigJSDriver<
 		this: any,
 		key: string,
 		value: unknown,
-		options?: object,
+		opions?: object,
 	) => inPromise<Async, void>;
 	private _onDel?: (this: any, key: string) => inPromise<Async, void>;
 
@@ -56,10 +56,10 @@ export class ConfigJSDriver<
 	protected deepMerge = deepMerge;
 
 	/**
-	 * Creates a new instance of ConfigJSDriver.
+	 * Creates a new instance of KfgDriver.
 	 * @param options The driver options.
 	 */
-	constructor(public readonly options: ConfigJSDriverOptions<C, S, Async>) {
+	constructor(public readonly options: KfgDriverOptions<C, S, Async>) {
 		this.identify = options.identify;
 		this.async = options.async as Async;
 		this.config = options.config || ({} as C);
@@ -206,9 +206,9 @@ export class ConfigJSDriver<
 		if (!Value.Check(this.compiledSchema, config)) {
 			const errors = [...Value.Errors(this.compiledSchema, config)];
 			throw new Error(
-				`[ConfigJS] Validation failed:\n${errors
-					.map((e) => `- ${e.path}: ${e.message}`)
-					.join("\n")}`,
+				`[Kfg] Validation failed:\n${errors
+					.map((e) => `- ${e.path}: ${e.message}`) // Corrected: escaped backtick in template literal
+					.join("\n")}`, // Corrected: escaped backtick in template literal
 			);
 		}
 

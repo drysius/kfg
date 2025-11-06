@@ -1,9 +1,9 @@
-import { c, ConfigJS, envDriver } from './src';
+import { c, Kfg, envDriver } from './src';
 enum AppTest {
     a,
     n
 }
-const config = new ConfigJS(envDriver, {
+const config = new Kfg(envDriver, {
     app: {
         port: c.number({
             prop:"DEFAILT",

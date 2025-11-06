@@ -2,6 +2,6 @@
     "entryPoints": ["./src/index.ts"],
     "out": "./docs",
     "theme": "default",
-    "name": "ConfigJS Documentation",
+    "name": "Kfg Documentation",
     "readme": "./README.md"
 }

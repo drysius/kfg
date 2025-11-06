@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { ConfigJSDriver } from "../driver";
 import { flattenObject, getProperty, unflattenObject } from "../utils/object";
+import { KfgDriver } from "../kfg-driver";
 
 // Recursively strips comment properties (e.g., "port:comment") from a nested data
 // object and returns them in a flat map, keyed by their full path.
@@ -40,7 +40,7 @@ function getFilePath(config: { path?: string }): string {
 /**
  * A driver for loading configuration from JSON files.
  */
-export const jsonDriver = new ConfigJSDriver({
+export const jsonDriver = new KfgDriver({
 	identify: "json-driver",
 	async: false,
 	config: { path: "config.json", keyroot: false },

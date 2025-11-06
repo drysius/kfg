@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { ConfigJSDriver } from "../driver";
+import { KfgDriver } from "../kfg-driver";
 import type { SchemaDefinition, TSchema } from "../types";
 import { parse, removeEnvKey, updateEnvContent } from "../utils/env";
 
@@ -72,7 +72,7 @@ function traverseSchema(
 /**
  * A driver for loading configuration from environment variables and .env files.
  */
-export const envDriver = new ConfigJSDriver({
+export const envDriver = new KfgDriver({
 	identify: "env-driver",
 	async: false,
 	config: { path: ".env" },

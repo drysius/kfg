@@ -2,20 +2,17 @@ import { describe, it, expect, afterAll, beforeEach } from 'bun:test';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as fsp from 'fs/promises';
-import { ConfigJS } from '../src/ConfigJS';
 import { c } from '../src/factory';
 import { envDriver } from '../src/drivers/env-driver';
 import { jsonDriver } from '../src/drivers/json-driver';
-import { ConfigJSDriver } from '../src/driver';
-import { buildDefaultObject } from '../src/utils/schema';
-import { deepMerge } from '../src/utils/object';
+import { Kfg, KfgDriver } from '../src';
 
 const COMPLEX_TEST_DIR = path.join(__dirname, 'complex-test-files');
 const COMPLEX_ENV_PATH = path.join(COMPLEX_TEST_DIR, '.env');
 const COMPLEX_JSON_PATH = path.join(COMPLEX_TEST_DIR, 'config.json');
 
 // An async version of the JSON driver, created for testing purposes.
-const asyncJsonDriver = new ConfigJSDriver({
+const asyncJsonDriver = new KfgDriver({
     ...jsonDriver,
     identify: 'async-json-driver',
     async: true,
@@ -85,7 +82,7 @@ APP_DATABASE_HOST=db.prod.local
 DB_PASSWORD=secret-from-env-file`
         );
 
-        const config = new ConfigJS(envDriver, complexSchema);
+        const config = new Kfg(envDriver, complexSchema);
         config.load({ path: COMPLEX_ENV_PATH });
 
         expect(config.get('app.server.port')).toBe(9090);
@@ -107,7 +104,7 @@ DB_PASSWORD=secret-from-env-file`
         };
         fs.writeFileSync(COMPLEX_JSON_PATH, JSON.stringify(initialJson));
 
-        const config = new ConfigJS(asyncJsonDriver, complexSchema);
+        const config = new Kfg(asyncJsonDriver, complexSchema);
 
         await config.load({ path: COMPLEX_JSON_PATH });
 

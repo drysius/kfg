@@ -1,4 +1,4 @@
-name: Publish @Caeljs/Config package
+name: Publish Kfg package
 
 on:
   workflow_dispatch:

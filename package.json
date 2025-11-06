@@ -1,14 +1,14 @@
 {
-  "name": "@caeljs/config",
+  "name": "kfg",
   "type": "module",
   "description": "Simple system of standardization of configurations for node js and bun.",
-  "version": "1.0.0-rc.5",
+  "version": "1.0.0",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/drylian/configjs.git"
+    "url": "git+https://github.com/drylian/kfg.git"
   },
   "typesVersions": {
     "*": {
@@ -31,6 +31,10 @@
     "env",
     "config-js",
     "json",
+    "kfg",
+    "kfgfs",
+    "kfg-fs",
+    "kfg-js",
     "config",
     "configjs",
     "npm",
@@ -45,14 +49,14 @@
   "author": "Drylian",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/drylian/configjs/issues"
+    "url": "https://github.com/drylian/kfg/issues"
   },
-  "homepage": "https://github.com/drylian/configjs#readme",
+  "homepage": "https://github.com/drylian/kfg#readme",
   "files": [
     "dist"
   ],
   "scripts": {
-"build": "tsc --project tsconfig.test.json && bun run build.ts",
+    "build": "tsc --project tsconfig.test.json && bun run build.ts",
     "docs": "typedoc",
     "test": "bun test",
     "check": "biome check --write",
