@@ -29,7 +29,7 @@ export class Kfg<
 	 * @param schema The schema to use for validating the configuration.
 	 */
 	constructor(driver: D, schema: S) {
-		this.driver = driver;
+		this.driver = driver.clone() as D;
 		this.schema = schema;
 	}
 
@@ -133,6 +133,23 @@ export class Kfg<
 			throw new Error("[Kfg] Config not loaded. Call load() first.");
 		}
 		return this.driver.insert(path, partial) as inPromise<D["async"], void>;
+	}
+
+	/**
+	 * Injects a partial value directly into the root configuration object.
+	 * @param data The partial data to inject.
+	 */
+	public inject(data: Partial<StaticSchema<S>>) {
+		// Note: inject usually happens before load for defaults, or after load for runtime overrides.
+		// If we strictly require loaded=true, we might block pre-load injection.
+		// However, Kfg usually requires load() to be called to initialize the driver's internal state structure.
+		// Since inject merges into this.driver.data, and this.driver.data is usually overwritten/initialized on load(),
+		// calling inject BEFORE load might be useless if load() overwrites it completely.
+		// But KfgDriver.load does `this.data = result`. So yes, inject MUST be called AFTER load.
+		if (!this.loaded) {
+			throw new Error("[Kfg] Config not loaded. Call load() first.");
+		}
+		return this.driver.inject(data) as inPromise<D["async"], void>;
 	}
 
 	/**

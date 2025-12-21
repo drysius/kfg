@@ -69,6 +69,27 @@ export class KfgDriver<
 	}
 
 	/**
+	 * Clones the driver.
+	 * @returns A new instance of the driver with the same options.
+	 */
+	public clone(): KfgDriver<C, S, Async> {
+		const Constructor = this.constructor as new (
+			options: KfgDriverOptions<C, S, Async>,
+		) => KfgDriver<C, S, Async>;
+		return new Constructor(this.options);
+	}
+
+	/**
+	 * Injects data directly into the driver's data store.
+	 * This data is merged with the existing data.
+	 * @param data The data to inject.
+	 */
+	public inject(data: Partial<StaticSchema<any>>): inPromise<Async, void> {
+		this.data = this.deepMerge(this.data, data);
+		return (this.async ? Promise.resolve() : undefined) as inPromise<Async, void>;
+	}
+
+	/**
 	 * Loads the configuration.
 	 * @param schema The schema to use for validating the configuration.
 	 * @param options The loading options.
@@ -200,11 +221,11 @@ export class KfgDriver<
 	private validate(config = this.data): void {
 		if (!this.compiledSchema) return;
 
-		this.data = Value.Default(this.compiledSchema, {}) as any;
-		Value.Convert(this.compiledSchema, config);
+		const configWithDefaults = Value.Default(this.compiledSchema, config) as any;
+		Value.Convert(this.compiledSchema, configWithDefaults);
 
-		if (!Value.Check(this.compiledSchema, config)) {
-			const errors = [...Value.Errors(this.compiledSchema, config)];
+		if (!Value.Check(this.compiledSchema, configWithDefaults)) {
+			const errors = [...Value.Errors(this.compiledSchema, configWithDefaults)];
 			throw new Error(
 				`[Kfg] Validation failed:\n${errors
 					.map((e) => `- ${e.path}: ${e.message}`) // Corrected: escaped backtick in template literal
@@ -212,6 +233,6 @@ export class KfgDriver<
 			);
 		}
 
-		this.data = config;
+		this.data = configWithDefaults;
 	}
 }
