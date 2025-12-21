@@ -22,6 +22,7 @@ export class Kfg<
 	public driver: D;
 	public schema: S;
 	private loaded = false;
+	private _lastOptions: any;
 
 	/**
 	 * Creates a new instance of Kfg.
@@ -31,6 +32,19 @@ export class Kfg<
 	constructor(driver: D, schema: S) {
 		this.driver = driver.clone() as D;
 		this.schema = schema;
+	}
+
+	/**
+	 * Reloads the configuration.
+	 * @param options - The loading options.
+	 */
+	public reload(
+		options?: Partial<D["config"]> & {
+			only_importants?: boolean;
+		},
+	) {
+		this.loaded = false;
+		return this.load(options || this._lastOptions);
 	}
 
 	/**
@@ -47,6 +61,7 @@ export class Kfg<
 			only_importants?: boolean;
 		},
 	) {
+		this._lastOptions = options;
 		let schemaToLoad = this.schema;
 		if (options?.only_importants) {
 			schemaToLoad = makeSchemaOptional(this.schema) as S;
@@ -173,6 +188,15 @@ export class Kfg<
 			throw new Error("[Kfg] Config not loaded. Call load() first.");
 		}
 		return getProperty(this.schema, path as string) as DeepGet<S, P>;
+	}
+
+	/**
+	 * Returns the schema definition for a given path.
+	 * @param path The path to the schema.
+	 * @returns The schema at the given path.
+	 */
+	public schematic<P extends Paths<StaticSchema<S>>>(path: P) {
+		return this.conf(path);
 	}
 
 	/**

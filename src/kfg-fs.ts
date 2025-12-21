@@ -262,6 +262,53 @@ export class KfgFS<
 	}
 
 	/**
+	 * Checks if a configuration file exists for a given ID.
+	 * @param id The ID of the configuration file.
+	 * @returns True if the file exists, false otherwise.
+	 */
+	public exist(id: string): boolean {
+		const filePath = this.getPath(id);
+		return fs.existsSync(filePath);
+	}
+
+	/**
+	 * Creates a new configuration file for a given ID.
+	 * @param id The ID of the configuration file.
+	 * @param data Optional initial data for the configuration.
+	 * @returns The created KfgFileFS instance.
+	 */
+	public create(
+		id: string,
+		data?: Partial<StaticSchema<S>>,
+	): inPromise<D["async"], KfgFileFS<D, S>> {
+		if (this.exist(id)) {
+			throw new Error(`[KfgFS] Config with id '${id}' already exists.`);
+		}
+
+		const instanceOrPromise = this.file(id);
+
+		const initialize = (instance: KfgFileFS<D, S>) => {
+			if (data) {
+				instance.inject(data);
+			}
+			const saveResult = instance.save();
+
+			if (this.driver.async) {
+				return (saveResult as Promise<void>).then(() => instance);
+			}
+			return instance;
+		};
+
+		if (this.driver.async) {
+			return (instanceOrPromise as Promise<KfgFileFS<D, S>>).then(
+				initialize,
+			) as any;
+		} else {
+			return initialize(instanceOrPromise as KfgFileFS<D, S>) as any;
+		}
+	}
+
+	/**
 	 * Gets a file-based configuration for a given ID.
 	 * @param id The ID of the configuration file.
 	 * @returns A KfgFileFS instance.

@@ -67,24 +67,18 @@ export function buildTypeBoxSchema(definition: SchemaDefinition): TObject {
 
 /**
  * Builds a default object from a schema definition.
+ * It converts the definition to a TypeBox schema, adds smart defaults,
+ * and then generates the default value using TypeBox's Value.Default.
+ * This ensures that nested defaults and priorities are handled correctly.
  * @param definition The schema definition.
  * @returns The default object.
  */
 export function buildDefaultObject(
 	definition: SchemaDefinition,
 ): Record<string, any> {
-	const obj: Record<string, any> = {};
-	for (const key in definition) {
-		const value = definition[key] as any;
-		if (value[Symbol.for("TypeBox.Kind")]) {
-			if (value.default !== undefined) {
-				obj[key] = value.default;
-			}
-		} else if (typeof value === "object" && value !== null) {
-			obj[key] = buildDefaultObject(value);
-		}
-	}
-	return obj;
+	const schema = buildTypeBoxSchema(definition);
+	addSmartDefaults(schema);
+	return Value.Default(schema, {}) as Record<string, any>;
 }
 
 /**
