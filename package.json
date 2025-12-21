@@ -2,13 +2,13 @@
   "name": "kfg",
   "type": "module",
   "description": "Simple system of standardization of configurations for node js and bun.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/drylian/kfg.git"
+    "url": "git+https://github.com/drysius/kfg.git"
   },
   "typesVersions": {
     "*": {
@@ -46,12 +46,12 @@
     "output",
     "performance"
   ],
-  "author": "Drylian",
+  "author": "Drysius",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/drylian/kfg/issues"
+    "url": "https://github.com/drysius/kfg/issues"
   },
-  "homepage": "https://kfg.drylian.com",
+  "homepage": "https://kfg.js.org",
   "files": [
     "dist"
   ],
