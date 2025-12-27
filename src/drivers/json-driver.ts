@@ -1,7 +1,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { flattenObject, getProperty, unflattenObject } from "../utils/object";
-import { KfgDriver } from "../kfg-driver";
+import { kfgDriver } from "../kfg-driver";
+import {
+	deepMerge,
+	flattenObject,
+	getProperty,
+	unflattenObject,
+} from "../utils/object";
+import { buildDefaultObject } from "../utils/schema";
 
 // Recursively strips comment properties (e.g., "port:comment") from a nested data
 // object and returns them in a flat map, keyed by their full path.
@@ -40,108 +46,96 @@ function getFilePath(config: { path?: string }): string {
 /**
  * A driver for loading configuration from JSON files.
  */
-export const jsonDriver = new KfgDriver({
-	identify: "json-driver",
-	async: false,
-	config: { path: "config.json", keyroot: false },
-	onLoad(schema, _opts) {
-		this.comments = this.comments || {};
-		const defaultData = this.buildDefaultObject(schema);
-		const filePath = getFilePath(this.config);
+export const jsonDriver = kfgDriver<{ path: string; keyroot: boolean }>(
+	(config) => {
+		let comments: Record<string, string> = {};
 
-		let loadedData: Record<string, any> = {};
-		if (fs.existsSync(filePath)) {
-			try {
-				const fileContent = fs.readFileSync(filePath, "utf-8");
-				if (fileContent) {
-					loadedData = JSON.parse(fileContent);
+		function save(data: any) {
+			let dataToSave: Record<string, any>;
+			if (config.keyroot) {
+				dataToSave = flattenObject(data);
+				for (const path in comments) {
+					dataToSave[`${path}:comment`] = comments[path];
 				}
-			} catch (_e) {
-				/* Ignore */
+			} else {
+				const dataWithComments = JSON.parse(JSON.stringify(data));
+				for (const path in comments) {
+					const keys = path.split(".");
+					const propName = keys.pop() as string;
+					const parentPath = keys.join(".");
+					const parentObject = parentPath
+						? getProperty(dataWithComments, parentPath)
+						: dataWithComments;
+					if (typeof parentObject === "object" && parentObject !== null) {
+						parentObject[`${propName}:comment`] = comments[path];
+					}
+				}
+				dataToSave = dataWithComments;
 			}
+
+			const filePath = getFilePath(config);
+			fs.writeFileSync(filePath, JSON.stringify(dataToSave, null, 2));
 		}
 
-		if (this.config.keyroot) {
-			const flatData = loadedData as Record<string, any>;
-			const comments: Record<string, string> = {};
-			const data: Record<string, any> = {};
-			for (const key in flatData) {
-				if (key.endsWith(":comment")) {
-					comments[key.replace(/:comment$/, "")] = flatData[key];
+		return {
+			name: "json-driver",
+			async: false,
+
+			load(schema, opts) {
+				Object.assign(config, opts);
+
+				const defaultData = buildDefaultObject(schema);
+				const filePath = getFilePath(config);
+
+				let loadedData: Record<string, any> = {};
+				if (fs.existsSync(filePath)) {
+					try {
+						const fileContent = fs.readFileSync(filePath, "utf-8");
+						if (fileContent) {
+							loadedData = JSON.parse(fileContent);
+						}
+					} catch (_e) {
+						/* Ignore */
+					}
+				}
+
+				if (config.keyroot) {
+					const flatData = loadedData as Record<string, any>;
+					const cmts: Record<string, string> = {};
+					const data: Record<string, any> = {};
+					for (const key in flatData) {
+						if (key.endsWith(":comment")) {
+							cmts[key.replace(/:comment$/, "")] = flatData[key];
+						} else {
+							data[key] = flatData[key];
+						}
+					}
+					comments = cmts;
+					loadedData = unflattenObject(data);
 				} else {
-					data[key] = flatData[key];
+					comments = stripComments(loadedData);
 				}
-			}
-			this.comments = comments;
-			loadedData = unflattenObject(data);
-		} else {
-			this.comments = stripComments(loadedData);
-		}
 
-		this.store = this.deepMerge(defaultData, loadedData);
-		return this.store;
-	},
-	onSet(key, _value, options) {
-		if (key) {
-			this.comments = this.comments || {};
-			if (options?.description) {
-				this.comments[key] = options.description;
-			}
-		}
+				return deepMerge(defaultData, loadedData);
+			},
 
-		let dataToSave: Record<string, any>;
-		if (this.config.keyroot) {
-			dataToSave = flattenObject(this.data);
-			for (const path in this.comments) {
-				dataToSave[`${path}:comment`] = this.comments[path];
-			}
-		} else {
-			const dataWithComments = JSON.parse(JSON.stringify(this.data));
-			for (const path in this.comments) {
-				const keys = path.split(".");
-				const propName = keys.pop() as string;
-				const parentPath = keys.join(".");
-				const parentObject = parentPath
-					? getProperty(dataWithComments, parentPath)
-					: dataWithComments;
-				if (typeof parentObject === "object" && parentObject !== null) {
-					parentObject[`${propName}:comment`] = this.comments[path];
+			set(key, _value, options) {
+				if (!options) options = {};
+				if (key) {
+					if (options?.description) {
+						comments[key] = options.description;
+					}
 				}
-			}
-			dataToSave = dataWithComments;
-		}
+				save(options.data);
+			},
 
-		const filePath = getFilePath(this.config);
-		fs.writeFileSync(filePath, JSON.stringify(dataToSave, null, 2));
-	},
-	onDel(key) {
-		if (this.comments?.[key]) {
-			delete this.comments[key];
-		}
-
-		let dataToSave: Record<string, any>;
-		if (this.config.keyroot) {
-			dataToSave = flattenObject(this.data);
-			for (const path in this.comments) {
-				dataToSave[`${path}:comment`] = this.comments[path];
-			}
-		} else {
-			const dataWithComments = JSON.parse(JSON.stringify(this.data));
-			for (const path in this.comments) {
-				const keys = path.split(".");
-				const propName = keys.pop() as string;
-				const parentPath = keys.join(".");
-				const parentObject = parentPath
-					? getProperty(dataWithComments, parentPath)
-					: dataWithComments;
-				if (typeof parentObject === "object" && parentObject !== null) {
-					parentObject[`${propName}:comment`] = this.comments[path];
+			del(key, options) {
+				if (!options) options = {};
+				if (comments?.[key]) {
+					delete comments[key];
 				}
-			}
-			dataToSave = dataWithComments;
-		}
-
-		const filePath = getFilePath(this.config);
-		fs.writeFileSync(filePath, JSON.stringify(dataToSave, null, 2));
+				save(options.data);
+			},
+		};
 	},
-});
+);

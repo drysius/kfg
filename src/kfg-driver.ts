@@ -1,15 +1,10 @@
-import type { TObject } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import type {
-	KfgDriverOptions,
-	DeepGet,
+	Driver,
 	DriverConfig,
-	DriverStore,
-	inPromise,
-	Paths,
-	RootPaths,
+	DriverFactory,
 	SchemaDefinition,
-	StaticSchema,
+	inPromise,
 } from "./types";
 import {
 	deepMerge,
@@ -17,222 +12,167 @@ import {
 	getProperty,
 	setProperty,
 } from "./utils/object";
-import {
-	addSmartDefaults,
-	buildDefaultObject,
-	buildTypeBoxSchema,
-} from "./utils/schema";
+import { addSmartDefaults, buildTypeBoxSchema } from "./utils/schema";
+
+type DriverImplementation = Omit<
+	Driver<any>,
+	"load" | "set" | "del" | "has" | "inject" | "get">
+&
+	Partial<
+		Pick<Driver<any>, "load" | "set" | "del" | "has" | "inject" | "get">
+	>;
 
 /**
- * The base class for all drivers.
- * @template C The type of the driver configuration.
- * @template S The type of the driver store.
- * @template Async The type of the async flag.
+ * Creates a new Kfg Driver factory.
+ * @param factory The factory function that initializes the driver logic.
  */
-export class KfgDriver< 
-	C extends DriverConfig,
-	S extends DriverStore,
-	Async extends boolean,
-> {
-	public readonly identify: string;
-	public async = undefined as unknown as Async;
-	public config: C;
-	public data: Record<string, any> = {};
-	public comments?: Record<string, string>;
-	private compiledSchema?: TObject;
+export function kfgDriver< 
+	C extends DriverConfig = any,
+	T extends Record<string, any> = {},
+>(
+	factory: (opts: Partial<C>) => T & DriverImplementation,
+): DriverFactory<C, any> {
+	return (config: Partial<C>) => {
+		const partialDriver = factory(config);
+		const async = partialDriver.async;
+		let _data: any = {};
 
-	protected store: S = {} as S;
-	_onLoad?(schema: SchemaDefinition, opts: Partial<C>): inPromise<Async, any>;
-	private _onSet?: (
-		this: any,
-		key: string,
-		value: unknown,
-		opions?: object,
-	) => inPromise<Async, void>;
-	private _onDel?: (this: any, key: string) => inPromise<Async, void>;
+		const driver: Driver<any> & T = {
+			...partialDriver,
 
-	// Utilities passed to drivers
-	protected buildDefaultObject = buildDefaultObject;
-	protected deepMerge = deepMerge;
+			load(schema: SchemaDefinition, opts?: any): inPromise<boolean, any> {
+				const validate = (data: any) => {
+					const compiledSchema = buildTypeBoxSchema(schema);
+					addSmartDefaults(compiledSchema);
+					const configWithDefaults = Value.Default(compiledSchema, data) as any;
+					Value.Convert(compiledSchema, configWithDefaults);
 
-	/**
-	 * Creates a new instance of KfgDriver.
-	 * @param options The driver options.
-	 */
-	constructor(public readonly options: KfgDriverOptions<C, S, Async>) {
-		this.identify = options.identify;
-		this.async = options.async as Async;
-		this.config = options.config || ({} as C);
-		this._onLoad = options.onLoad;
-		this._onSet = options.onSet;
-		this._onDel = options.onDel;
-	}
+					if (!Value.Check(compiledSchema, configWithDefaults)) {
+						const errors = [
+							...Value.Errors(compiledSchema, configWithDefaults),
+						];
+						throw new Error(
+							`[Kfg] Validation failed:\n${errors
+								.map((e) => `- ${e.path}: ${e.message}`)
+								.join("\n")}`,
+						);
+					}
+					return configWithDefaults;
+				};
 
-	/**
-	 * Clones the driver.
-	 * @returns A new instance of the driver with the same options.
-	 */
-	public clone(): KfgDriver<C, S, Async> {
-		const Constructor = this.constructor as new (
-			options: KfgDriverOptions<C, S, Async>,
-		) => KfgDriver<C, S, Async>;
-		return new Constructor(this.options);
-	}
+				const runLoad = () => {
+					if (partialDriver.load) {
+						const result = partialDriver.load.call(driver, schema, opts);
+						if (async) {
+							return (result as Promise<any>).then((res) => {
+								const validated = validate(res);
+								_data = validated;
+								return validated;
+							}) as any;
+						}
+						const validated = validate(result);
+						_data = validated;
+						return validated;
+					}
+					return (
+						async ? Promise.resolve(validate(_data)) : validate(_data)
+					) as any;
+				};
 
-	/**
-	 * Injects data directly into the driver's data store.
-	 * This data is merged with the existing data.
-	 * @param data The data to inject.
-	 */
-	public inject(data: Partial<StaticSchema<any>>): inPromise<Async, void> {
-		this.data = this.deepMerge(this.data, data);
-		return (this.async ? Promise.resolve() : undefined) as inPromise<Async, void>;
-	}
+				if (partialDriver.onRequest) {
+					const req = partialDriver.onRequest.call(driver);
+					if (async) return (req as Promise<void>).then(() => runLoad());
+					return runLoad();
+				}
+				return runLoad();
+			},
 
-	/**
-	 * Loads the configuration.
-	 * @param schema The schema to use for validating the configuration.
-	 * @param options The loading options.
-	 */
-	public load(
-		schema: SchemaDefinition,
-		options: Partial<C> = {},
-	): inPromise<Async, void> {
-		this.compiledSchema = buildTypeBoxSchema(schema);
-		addSmartDefaults(this.compiledSchema);
-		this.config = { ...this.config, ...options };
-		const processResult = (result: any) => {
-			this.data = result;
-			this.validate(this.data);
-		};
+			get(key?: string): inPromise<boolean, any> {
+				const runGet = () => {
+					if (partialDriver.get) return partialDriver.get.call(driver, key);
+					if (!key) return _data;
+					return getProperty(_data, key);
+				};
+				if (partialDriver.onRequest) {
+					const req = partialDriver.onRequest.call(driver);
+					if (async) return (req as Promise<void>).then(() => runGet());
+					return runGet();
+				}
+				return runGet();
+			},
 
-		if (this._onLoad) {
-			const loadResult = this._onLoad.call(this, schema, this.config);
+			set(key: string, value: any, options?: any): inPromise<boolean, void> {
+				const runSet = () => {
+					setProperty(_data, key, value);
+					if (partialDriver.set) {
+						return partialDriver.set.call(driver, key, value, options);
+					}
+					return (async ? Promise.resolve() : undefined) as any;
+				};
 
-			if (this.async) {
-				return (loadResult as Promise<any>).then(processResult) as inPromise<
-					Async,
-					void
-				>;
-			}
+				if (partialDriver.onRequest) {
+					const req = partialDriver.onRequest.call(driver);
+					if (async) return (req as Promise<void>).then(() => runSet());
+					return runSet();
+				}
+				return runSet();
+			},
 
-			processResult(loadResult);
-		}
+			has(...keys: string[]): inPromise<boolean, boolean> {
+				const runHas = () => {
+					if (partialDriver.has) return partialDriver.has.call(driver, ...keys);
+					return keys.every((key) => getProperty(_data, key) !== undefined);
+				};
+				if (partialDriver.onRequest) {
+					const req = partialDriver.onRequest.call(driver);
+					if (async) return (req as Promise<void>).then(() => runHas());
+					return runHas();
+				}
+				return runHas();
+			},
 
-		return undefined as inPromise<Async, void>;
-	}
+			del(key: string, options?: any): inPromise<boolean, void> {
+				const runDel = () => {
+					deleteProperty(_data, key);
+					if (partialDriver.del) {
+						return partialDriver.del.call(driver, key, options);
+					}
+					return (async ? Promise.resolve() : undefined) as any;
+				};
 
-	/**
-	 * Gets a value from the configuration.
-	 * @param path The path to the value.
-	 * @returns The value at the given path.
-	 */
-	public get<T = StaticSchema<any>, P extends Paths<T> = any>(
-		path: P,
-	): inPromise<Async, DeepGet<T, P>> {
-		//console.log('get', this.data)
-		const value = getProperty(this.data, path as string);
-		if (this.async) {
-			return Promise.resolve(value) as any;
-		}
-		return value as any;
-	}
+				if (partialDriver.onRequest) {
+					const req = partialDriver.onRequest.call(driver);
+					if (async) return (req as Promise<void>).then(() => runDel());
+					return runDel();
+				}
+				return runDel();
+			},
 
-	/**
-	 * Checks if a value exists in the configuration.
-	 * @param paths The paths to the values.
-	 * @returns True if all values exist, false otherwise.
-	 */
-	public has<T = StaticSchema<any>, P extends Paths<T> = any>(
-		...paths: P[]
-	): inPromise<Async, boolean> {
-		const hasAllProps = paths.every(
-			(path) => getProperty(this.data, path as string) !== undefined,
-		);
-		if (this.async) {
-			return Promise.resolve(hasAllProps) as any;
-		}
-		return hasAllProps as any;
-	}
+			inject(data: any): inPromise<boolean, void> {
+				const runInject = () => {
+					_data = deepMerge(_data, data);
+					if (partialDriver.inject)
+						return partialDriver.inject.call(driver, data);
+					return (async ? Promise.resolve() : undefined) as any;
+				};
+				if (partialDriver.onRequest) {
+					const req = partialDriver.onRequest.call(driver);
+					if (async) return (req as Promise<void>).then(() => runInject());
+					return runInject();
+				}
+				return runInject();
+			},
 
-	/**
-	 * Sets a value in the configuration.
-	 * @param path The path to the value.
-	 * @param value The new value.
-	 * @param options The options for setting the value.
-	 */
-	public set<T = StaticSchema<any>, P extends Paths<T> = any>(
-		path: P,
-		value: DeepGet<T, P>,
-		options?: { description?: string },
-	): inPromise<Async, void> {
-		if (path) {
-			// <--- Add this check
-			setProperty(this.data, path as string, value);
-		}
-		if (this._onSet) {
-			return this._onSet.call(this, path as string, value, options);
-		}
-		return (this.async ? Promise.resolve() : undefined) as inPromise<
-			Async,
-			void
-		>;
-	}
+			unmount() {
+				if (partialDriver.unmount) {
+					partialDriver.unmount.call(driver);
+				}
+			},
+		} as Driver<any> & T;
 
-	/**
-	 * Inserts a partial value into an object in the configuration.
-	 * @param path The path to the object.
-	 * @param partial The partial value to insert.
-	 */
-	public insert<T = StaticSchema<any>, P extends RootPaths<T> = any>(
-		path: P,
-		partial: Partial<DeepGet<T, P>>,
-	): inPromise<Async, void> {
-		const currentObject = getProperty(this.data, path as string);
-		if (typeof currentObject !== "object" || currentObject === null) {
-			throw new Error(`Cannot insert into non-object at path: ${path}`);
-		}
-		Object.assign(currentObject, partial);
-
-		return this.set(path as any, currentObject as any);
-	}
-
-	/**
-	 * Deletes a value from the configuration.
-	 * @param path The path to the value.
-	 */
-	public del<T = StaticSchema<any>, P extends Paths<T> = any>(
-		path: P,
-	): inPromise<Async, void> {
-		deleteProperty(this.data, path as string);
-		if (this._onDel) {
-			return this._onDel.call(this, path as string);
-		}
-		return (this.async ? Promise.resolve() : undefined) as inPromise<
-			Async,
-			void
-		>;
-	}
-
-	/**
-	 * Validates the configuration against the schema.
-	 * @param config The configuration to validate.
-	 */
-	private validate(config = this.data): void {
-		if (!this.compiledSchema) return;
-
-		const configWithDefaults = Value.Default(this.compiledSchema, config) as any;
-		Value.Convert(this.compiledSchema, configWithDefaults);
-
-		if (!Value.Check(this.compiledSchema, configWithDefaults)) {
-			const errors = [...Value.Errors(this.compiledSchema, configWithDefaults)];
-			throw new Error(
-				`[Kfg] Validation failed:\n${errors
-					.map((e) => `- ${e.path}: ${e.message}`) // Corrected: escaped backtick in template literal
-					.join("\n")}`, // Corrected: escaped backtick in template literal
-			);
-		}
-
-		this.data = configWithDefaults;
-	}
+		return driver;
+	};
 }
+
+// For compatibility if needed
+export type KfgDriver<_C, _S, _A> = Driver<boolean>;

@@ -3,12 +3,10 @@ import type {
 	Static,
 	TObject,
 	TSchema,
-	TUnsafe,
 } from "@sinclair/typebox";
 export type { TSchema, TObject, SchemaOptions };
 
-import type { KfgDriver } from "./kfg-driver";
-import { KfgFileFS } from "./kfg-fs";
+import type { Model } from "./model";
 
 // --- Driver Related Types ---
 
@@ -69,107 +67,49 @@ export type inPromise<Async extends boolean, Result> = Async extends true
 /**
  * Represents the configuration of a driver.
  */
-export type DriverConfig = Record<string, unknown>;
-/**
- * Represents the store of a driver.
- */
-export type DriverStore = Record<string, unknown>;
+export type DriverConfig = Record<any, any>;
 
 /**
- * Represents the onLoad method of a driver.
- * @template C The type of the driver configuration.
- * @template S The type of the driver store.
- * @template A The type of the async flag.
+ * The interface for a Functional Driver instance.
+ * @template A Async flag
  */
-export type DriverOnLoad<
-	C extends DriverConfig,
-	S extends DriverStore,
-	A extends boolean,
-> = (
-	this: KfgDriver<C, S, A>,
-	schema: SchemaDefinition,
-	opts: Partial<C>,
-) => inPromise<A, any>;
-/**
- * Represents the onSet method of a driver.
- * @template C The type of the driver configuration.
- * @template S The type of the driver store.
- * @template A The type of the async flag.
- */
-export type DriverOnSet<
-	C extends DriverConfig,
-	S extends DriverStore,
-	A extends boolean,
-> = (
-	this: KfgDriver<C, S, A>,
-	key: string,
-	value: unknown,
-	options?: { description?: string },
-) => inPromise<A, void>;
-
-/**
- * Represents the onDel method of a driver.
- * @template C The type of the driver configuration.
- * @template S The type of the driver store.
- * @template A The type of the async flag.
- */
-export type DriverOnDel<
-	C extends DriverConfig,
-	S extends DriverStore,
-	A extends boolean,
-> = (this: KfgDriver<C, S, A>, key: string) => inPromise<A, void>;
-
-/**
- * Represents the options of a driver.
- * @template C The type of the driver configuration.
- * @template S The type of the driver store.
- * @template A The type of the async flag.
- */
-export interface KfgDriverOptions<
-	C extends DriverConfig,
-	S extends DriverStore,
-	A extends boolean,
-> {
-	identify: string;
+export interface Driver<A extends boolean> {
+	name: string;
 	async: A;
-	config: C;
-	getEnvKeyForPath?: (path: string) => string;
-	onLoad?: DriverOnLoad<C, S, A>;
-	onSet?: DriverOnSet<C, S, A>;
-	onDel?: DriverOnDel<C, S, A>;
+	model?: boolean;
+
+	load(schema: SchemaDefinition, opts?: any): inPromise<A, any>;
+	get(key?: string): inPromise<A, any>;
+	set(
+		key: string,
+		value: any,
+		options?: { description?: string; data?: any },
+	): inPromise<A, void>;
+	has(...keys: string[]): inPromise<A, boolean>;
+	del(key: string, options?: { data?: any }): inPromise<A, void>;
+	inject(data: any): inPromise<A, void>;
+
+	/** Called before operations like get, set, del, etc. */
+	onRequest?(): inPromise<A, void>;
+	/** Called when the driver is no longer needed or updated. */
+	unmount?(): void;
+
+	// Optional Model methods
+	find?(schema: SchemaDefinition, opts: any): any;
+	findBy?(schema: SchemaDefinition, opts: any): any;
+	create?(schema: SchemaDefinition, data: any): any;
+	update?(schema: SchemaDefinition, id: any, data: any): any;
+	delete?(schema: SchemaDefinition, id: any): any;
 }
 
+/**
+ * Factory function type to create a driver.
+ */
+export type DriverFactory<C extends DriverConfig, A extends boolean> = (
+	config: Partial<C>,
+) => Driver<A>;
+
 // --- Schema Related Types ---
-
-/**
- * Represents the static schema with relations.
- * @template S The type of the schema.
- */
-export type StaticSchemaWithRelation<S> = S extends TSchema
-	? StaticSchema<S>
-	: {
-			[K in keyof S]: S[K] extends KfgFileFS<any, any>
-				? string
-				: S[K] extends KfgFileFS<any, any>[]
-					? string[]
-					: StaticSchemaWithRelation<S[K]>;
-		};
-
-/**
- * Represents the paths to the relations in a schema.
- * @template S The type of the schema.
- */
-export type RelationPaths<S extends SchemaDefinition> = S extends TSchema
-	? never
-	: {
-			[K in keyof S]: S[K] extends
-				| TUnsafe<KfgFileFS<any, any>>
-				| TUnsafe<KfgFileFS<any, any>[]>
-				? K
-				: S[K] extends SchemaDefinition
-					? `${K & string}.${RelationPaths<S[K]>}`
-					: never;
-		}[keyof S];
 
 /**
  * A recursive type representing the user-friendly schema definition.
@@ -205,4 +145,6 @@ export interface CustomOptions<Default = any> {
 	initial_save?: boolean;
 	prop?: string;
 	refines?: ((value: unknown) => boolean | string)[];
+	model?: Model<any>;
+	createms?: boolean;
 }

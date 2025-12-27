@@ -5,32 +5,49 @@ import * as fsp from 'fs/promises';
 import { c } from '../src/factory';
 import { envDriver } from '../src/drivers/env-driver';
 import { jsonDriver } from '../src/drivers/json-driver';
-import { Kfg, KfgDriver } from '../src';
+import { Kfg, kfgDriver } from '../src';
+import { deepMerge } from '../src/utils/object';
+import { buildDefaultObject } from '../src/utils/schema';
 
 const COMPLEX_TEST_DIR = path.join(__dirname, 'complex-test-files');
 const COMPLEX_ENV_PATH = path.join(COMPLEX_TEST_DIR, '.env');
 const COMPLEX_JSON_PATH = path.join(COMPLEX_TEST_DIR, 'config.json');
 
 // An async version of the JSON driver, created for testing purposes.
-const asyncJsonDriver = new KfgDriver({
-    ...jsonDriver,
-    identify: 'async-json-driver',
-    async: true,
-    async onLoad(schema, opts) {
-        const defaultData = this.buildDefaultObject(schema);
-        const filePath = path.resolve(process.cwd(), opts.path || this.config.path || 'config.json');
-        let loadedData = {};
-        try {
-            const fileContent = await fsp.readFile(filePath, 'utf-8');
-            if (fileContent) loadedData = JSON.parse(fileContent);
-        } catch (e) { /* Ignore if file doesn't exist or is invalid */ }
-        this.store = this.deepMerge(defaultData, loadedData);
-        return this.store;
-    },
-    async onSet(key, value) {
-        const filePath = path.resolve(process.cwd(), this.config.path || 'config.json');
-        await fsp.writeFile(filePath, JSON.stringify(this.data, null, 2));
-    },
+const asyncJsonDriver = kfgDriver<any>((config) => {
+    return {
+        name: 'async-json-driver',
+        async: true,
+        
+        load(schema, opts) {
+            Object.assign(config, opts);
+            return (async () => {
+                const defaultData = buildDefaultObject(schema);
+                const filePath = path.resolve(process.cwd(), config.path || 'config.json');
+                let loadedData = {};
+                try {
+                    const fileContent = await fsp.readFile(filePath, 'utf-8');
+                    if (fileContent) loadedData = JSON.parse(fileContent);
+                } catch (e) { /* Ignore if file doesn't exist or is invalid */ }
+                
+                return deepMerge(defaultData, loadedData);
+            })();
+        },
+        
+        set(key, value, options) {
+             return (async () => {
+                const filePath = path.resolve(process.cwd(), config.path || 'config.json');
+                await fsp.writeFile(filePath, JSON.stringify(options.data, null, 2));
+             })();
+        },
+        
+        del(key, options) {
+             return (async () => {
+                const filePath = path.resolve(process.cwd(), config.path || 'config.json');
+                await fsp.writeFile(filePath, JSON.stringify(options.data, null, 2));
+             })();
+        }
+    };
 });
 
 describe('Complex Scenarios', () => {

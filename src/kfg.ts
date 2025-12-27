@@ -1,6 +1,7 @@
-import type { KfgDriver } from "./kfg-driver";
 import type {
 	DeepGet,
+	Driver,
+	DriverFactory,
 	inPromise,
 	Paths,
 	RootPaths,
@@ -15,10 +16,7 @@ import { makeSchemaOptional } from "./utils/schema";
  * @template D The type of the driver.
  * @template S The type of the schema.
  */
-export class Kfg<
-	D extends KfgDriver<any, any, any>,
-	S extends SchemaDefinition,
-> {
+export class Kfg<D extends Driver<any>, S extends SchemaDefinition> {
 	public driver: D;
 	public schema: S;
 	private loaded = false;
@@ -26,11 +24,15 @@ export class Kfg<
 
 	/**
 	 * Creates a new instance of Kfg.
-	 * @param driver The driver to use for loading and saving the configuration.
+	 * @param driverOrFactory The driver instance or factory function.
 	 * @param schema The schema to use for validating the configuration.
 	 */
-	constructor(driver: D, schema: S) {
-		this.driver = driver.clone() as D;
+	constructor(driverOrFactory: D | DriverFactory<any, any>, schema: S) {
+		if (typeof driverOrFactory === "function") {
+			this.driver = driverOrFactory({}) as D;
+		} else {
+			this.driver = driverOrFactory;
+		}
 		this.schema = schema;
 	}
 
@@ -39,7 +41,7 @@ export class Kfg<
 	 * @param options - The loading options.
 	 */
 	public reload(
-		options?: Partial<D["config"]> & {
+		options?: any & {
 			only_importants?: boolean;
 		},
 	) {
@@ -52,12 +54,7 @@ export class Kfg<
 	 * @param options - The loading options.
 	 */
 	public load(
-		options?: Partial<D["config"]> & {
-			/**
-			 * If true, all schema properties will be treated as optional during validation,
-			 * except for those marked as `important: true`. This is useful for loading a
-			 * partial configuration without triggering validation errors for missing values.
-			 */
+		options?: any & {
 			only_importants?: boolean;
 		},
 	) {
@@ -68,12 +65,14 @@ export class Kfg<
 		}
 		const result = this.driver.load(schemaToLoad, options);
 		if (this.driver.async) {
-			return (result as Promise<void>).then(() => {
+			return (result as Promise<any>).then((data) => {
+				this.driver.inject(data);
 				this.loaded = true;
 			}) as inPromise<D["async"], void>;
 		}
+		this.driver.inject(result);
 		this.loaded = true;
-		return result as inPromise<D["async"], void>;
+		return undefined as inPromise<D["async"], void>;
 	}
 
 	/**
@@ -85,7 +84,7 @@ export class Kfg<
 		if (!this.loaded) {
 			throw new Error("[Kfg] Config not loaded. Call load() first.");
 		}
-		return this.driver.get(path) as inPromise<
+		return this.driver.get(path as string) as inPromise<
 			D["async"],
 			DeepGet<StaticSchema<S>, P>
 		>;
@@ -112,7 +111,7 @@ export class Kfg<
 		if (!this.loaded) {
 			throw new Error("[Kfg] Config not loaded. Call load() first.");
 		}
-		return this.driver.get(path) as inPromise<
+		return this.driver.get(path as string) as inPromise<
 			D["async"],
 			DeepGet<StaticSchema<S>, P>
 		>;
@@ -132,7 +131,18 @@ export class Kfg<
 		if (!this.loaded) {
 			throw new Error("[Kfg] Config not loaded. Call load() first.");
 		}
-		return this.driver.set(path, value, options) as inPromise<D["async"], void>;
+
+		const run = async () => {
+			const data = await this.driver.get();
+			return this.driver.set(path as string, value, { ...options, data });
+		};
+
+		if (this.driver.async) return run() as inPromise<D["async"], void>;
+		const data = this.driver.get();
+		return this.driver.set(path as string, value, {
+			...options,
+			data,
+		}) as inPromise<D["async"], void>;
 	}
 
 	/**
@@ -147,7 +157,28 @@ export class Kfg<
 		if (!this.loaded) {
 			throw new Error("[Kfg] Config not loaded. Call load() first.");
 		}
-		return this.driver.insert(path, partial) as inPromise<D["async"], void>;
+
+		const run = async () => {
+			const data = await this.driver.get();
+			const target = getProperty(data, path as string);
+			if (typeof target !== "object" || target === null) {
+				throw new Error(`Cannot insert into non-object at path: ${path}`);
+			}
+			Object.assign(target, partial);
+			return this.driver.set(path as string, target, { data });
+		};
+
+		if (this.driver.async) return run() as inPromise<D["async"], void>;
+		const data = this.driver.get();
+		const target = getProperty(data, path as string);
+		if (typeof target !== "object" || target === null) {
+			throw new Error(`Cannot insert into non-object at path: ${path}`);
+		}
+		Object.assign(target, partial);
+		return this.driver.set(path as string, target, { data }) as inPromise<
+			D["async"],
+			void
+		>;
 	}
 
 	/**
@@ -155,15 +186,6 @@ export class Kfg<
 	 * @param data The partial data to inject.
 	 */
 	public inject(data: Partial<StaticSchema<S>>) {
-		// Note: inject usually happens before load for defaults, or after load for runtime overrides.
-		// If we strictly require loaded=true, we might block pre-load injection.
-		// However, Kfg usually requires load() to be called to initialize the driver's internal state structure.
-		// Since inject merges into this.driver.data, and this.driver.data is usually overwritten/initialized on load(),
-		// calling inject BEFORE load might be useless if load() overwrites it completely.
-		// But KfgDriver.load does `this.data = result`. So yes, inject MUST be called AFTER load.
-		if (!this.loaded) {
-			throw new Error("[Kfg] Config not loaded. Call load() first.");
-		}
 		return this.driver.inject(data) as inPromise<D["async"], void>;
 	}
 
@@ -175,7 +197,18 @@ export class Kfg<
 		if (!this.loaded) {
 			throw new Error("[Kfg] Config not loaded. Call load() first.");
 		}
-		return this.driver.del(path) as inPromise<D["async"], void>;
+
+		const run = async () => {
+			const data = await this.driver.get();
+			return this.driver.del(path as string, { data });
+		};
+
+		if (this.driver.async) return run() as inPromise<D["async"], void>;
+		const data = this.driver.get();
+		return this.driver.del(path as string, { data }) as inPromise<
+			D["async"],
+			void
+		>;
 	}
 
 	/**
@@ -200,19 +233,31 @@ export class Kfg<
 	}
 
 	/**
+	 * Hydrates the configuration with data and marks it as loaded.
+	 * @param data The data to hydrate with.
+	 */
+	public hydrate(data: Partial<StaticSchema<S>>) {
+		this.inject(data);
+		this.loaded = true;
+	}
+
+	/**
 	 * Returns cached data
 	 * @returns
 	 */
-	public async toJSON() {
+	public toJSON() {
 		if (!this.loaded) {
 			throw new Error("[Kfg] Config not loaded. Call load() first.");
 		}
-		if (this.driver.async) {
-			return Promise.resolve(this.driver.data) as inPromise<
-				D["async"],
-				StaticSchema<S>
-			>;
+		return this.driver.get() as inPromise<D["async"], StaticSchema<S>>;
+	}
+
+	/**
+	 * Unmounts the driver and cleans up resources.
+	 */
+	public unmount() {
+		if (this.driver.unmount) {
+			this.driver.unmount();
 		}
-		return this.driver.data as inPromise<D["async"], StaticSchema<S>>;
 	}
 }

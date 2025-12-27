@@ -129,6 +129,28 @@ const _c = {
 			max,
 		});
 	},
+
+	/** Creates a Model relation schema. */
+	Model: (
+		model: any,
+		resolver?: (instance: any) => any,
+		options?: CustomOptions<any>,
+	) => {
+		return Type.Any({
+			...options,
+			model,
+			resolver,
+		});
+	},
+
+	/** Creates a number schema that defaults to current timestamp in ms. */
+	createms: (options?: NumberOptions & CustomOptions<number>) => {
+		return Type.Number({
+			...options,
+			createms: true,
+			default: Date.now(),
+		});
+	},
 };
 
 /**
@@ -151,5 +173,8 @@ export const c = {
 	any: _c.Any,
 	optional: _c.Optional,
 	random: _c.Random,
+	model: _c.Model,
+	createms: _c.createms,
 };
 export const k = c;
+export const m = c;

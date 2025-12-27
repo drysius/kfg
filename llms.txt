@@ -1,0 +1,1961 @@
+
+--- START OF FILE: src/kfg.ts ---
+import type { Driver, DriverFactory } from "./types";
+import type {
+	DeepGet,
+	inPromise,
+	Paths,
+	RootPaths,
+	SchemaDefinition,
+	StaticSchema,
+} from "./types";
+import { getProperty, setProperty, deepMerge, deleteProperty } from "./utils/object";
+import { makeSchemaOptional } from "./utils/schema";
+
+/**
+ * The main class for Kfg. It is responsible for loading and managing the configuration.
+ * @template D The type of the driver.
+ * @template S The type of the schema.
+ */
+export class Kfg<
+	D extends Driver<any>,
+	S extends SchemaDefinition,
+> {
+	public driver: D;
+	public schema: S;
+	private loaded = false;
+	private _lastOptions: any;
+
+	/**
+	 * Creates a new instance of Kfg.
+	 * @param driverOrFactory The driver instance or factory function.
+	 * @param schema The schema to use for validating the configuration.
+	 */
+	constructor(driverOrFactory: D | DriverFactory<any, any>, schema: S) {
+        if (typeof driverOrFactory === 'function') {
+            this.driver = driverOrFactory({}) as D;
+        } else {
+            this.driver = driverOrFactory;
+        }
+		this.schema = schema;
+	}
+
+	/**
+	 * Reloads the configuration.
+	 * @param options - The loading options.
+	 */
+	public reload(
+		options?: any & {
+			only_importants?: boolean;
+		},
+	) {
+		this.loaded = false;
+		return this.load(options || this._lastOptions);
+	}
+
+	/**
+	 * Loads the configuration.
+	 * @param options - The loading options.
+	 */
+	public load(
+		options?: any & {
+			only_importants?: boolean;
+		},
+	) {
+		this._lastOptions = options;
+		let schemaToLoad = this.schema;
+		if (options?.only_importants) {
+			schemaToLoad = makeSchemaOptional(this.schema) as S;
+		}
+		const result = this.driver.load(schemaToLoad, options);
+		if (this.driver.async) {
+			return (result as Promise<any>).then((data) => {
+                this.driver.inject(data);
+				this.loaded = true;
+			}) as inPromise<D["async"], void>;
+		}
+        this.driver.inject(result);
+		this.loaded = true;
+		return undefined as inPromise<D["async"], void>;
+	}
+
+	/**
+	 * Gets a value from the configuration.
+	 * @param path The path to the value.
+	 * @returns The value at the given path.
+	 */
+	public get<P extends Paths<StaticSchema<S>>>(path: P) {
+		if (!this.loaded) {
+			throw new Error("[Kfg] Config not loaded. Call load() first.");
+		}
+		return this.driver.get(path as string) as inPromise<
+			D["async"],
+			DeepGet<StaticSchema<S>, P>
+		>;
+	}
+
+	/**
+	 * Checks if a value exists in the configuration.
+	 * @param paths The paths to the values.
+	 * @returns True if all values exist, false otherwise.
+	 */
+	public has<P extends Paths<StaticSchema<S>>>(...paths: P[]) {
+		if (!this.loaded) {
+			throw new Error("[Kfg] Config not loaded. Call load() first.");
+		}
+		return this.driver.has(...paths) as inPromise<D["async"], boolean>;
+	}
+
+	/**
+	 * Gets a value from the configuration.
+	 * @param path The path to the value.
+	 * @returns The value at the given path.
+	 */
+	public root<P extends RootPaths<StaticSchema<S>>>(path: P) {
+		if (!this.loaded) {
+			throw new Error("[Kfg] Config not loaded. Call load() first.");
+		}
+		return this.driver.get(path as string) as inPromise<
+			D["async"],
+			DeepGet<StaticSchema<S>, P>
+		>;
+	}
+
+	/**
+	 * Sets a value in the configuration.
+	 * @param path The path to the value.
+	 * @param value The new value.
+	 * @param options The options for setting the value.
+	 */
+	public set<P extends Paths<StaticSchema<S>>>(
+		path: P,
+		value: DeepGet<StaticSchema<S>, P>,
+		options?: { description?: string },
+	) {
+		if (!this.loaded) {
+			throw new Error("[Kfg] Config not loaded. Call load() first.");
+		}
+        
+        const run = async () => {
+            const data = await this.driver.get();
+            return this.driver.set(path as string, value, { ...options, data });
+        };
+
+        if (this.driver.async) return run() as inPromise<D["async"], void>;
+        const data = this.driver.get();
+		return this.driver.set(path as string, value, { ...options, data }) as inPromise<D["async"], void>;
+	}
+
+	/**
+	 * Inserts a partial value into an object in the configuration.
+	 * @param path The path to the object.
+	 * @param partial The partial value to insert.
+	 */
+	public insert<P extends RootPaths<StaticSchema<S>>>(
+		path: P,
+		partial: Partial<DeepGet<StaticSchema<S>, P>>,
+	) {
+		if (!this.loaded) {
+			throw new Error("[Kfg] Config not loaded. Call load() first.");
+		}
+        
+        const run = async () => {
+            const data = await this.driver.get();
+            const target = getProperty(data, path as string);
+            if (typeof target !== "object" || target === null) {
+                throw new Error(`Cannot insert into non-object at path: ${path}`);
+            }
+            Object.assign(target, partial);
+            return this.driver.set(path as string, target, { data });
+        };
+
+        if (this.driver.async) return run() as inPromise<D["async"], void>;
+        const data = this.driver.get();
+        const target = getProperty(data, path as string);
+		if (typeof target !== "object" || target === null) {
+			throw new Error(`Cannot insert into non-object at path: ${path}`);
+		}
+		Object.assign(target, partial);
+		return this.driver.set(path as string, target, { data }) as inPromise<D["async"], void>;
+	}
+
+	/**
+	 * Injects a partial value directly into the root configuration object.
+	 * @param data The partial data to inject.
+	 */
+	public inject(data: Partial<StaticSchema<S>>) {
+		return this.driver.inject(data) as inPromise<D["async"], void>;
+	}
+
+	/**
+	 * Deletes a value from the configuration.
+	 * @param path The path to the value.
+	 */
+	public del<P extends Paths<StaticSchema<S>>>(path: P) {
+		if (!this.loaded) {
+			throw new Error("[Kfg] Config not loaded. Call load() first.");
+		}
+        
+        const run = async () => {
+            const data = await this.driver.get();
+            return this.driver.del(path as string, { data });
+        };
+
+        if (this.driver.async) return run() as inPromise<D["async"], void>;
+        const data = this.driver.get();
+		return this.driver.del(path as string, { data }) as inPromise<D["async"], void>;
+	}
+
+	/**
+	 * Gets the schema for a given path.
+	 * @param path The path to the schema.
+	 * @returns The schema at the given path.
+	 */
+	public conf<P extends Paths<StaticSchema<S>>>(path: P) {
+		if (!this.loaded) {
+			throw new Error("[Kfg] Config not loaded. Call load() first.");
+		}
+		return getProperty(this.schema, path as string) as DeepGet<S, P>;
+	}
+
+	/**
+	 * Returns the schema definition for a given path.
+	 * @param path The path to the schema.
+	 * @returns The schema at the given path.
+	 */
+	public schematic<P extends Paths<StaticSchema<S>>>(path: P) {
+		return this.conf(path);
+	}
+
+	/**
+	 * Hydrates the configuration with data and marks it as loaded.
+	 * @param data The data to hydrate with.
+	 */
+	public hydrate(data: Partial<StaticSchema<S>>) {
+		this.inject(data);
+		this.loaded = true;
+	}
+
+	/**
+	 * Returns cached data
+	 * @returns
+	 */
+	public toJSON() {
+		if (!this.loaded) {
+			throw new Error("[Kfg] Config not loaded. Call load() first.");
+		}
+		return this.driver.get() as inPromise<D["async"], StaticSchema<S>>;
+	}
+
+    /**
+     * Unmounts the driver and cleans up resources.
+     */
+    public unmount() {
+        if (this.driver.unmount) {
+            this.driver.unmount();
+        }
+    }
+}
+
+--- END OF FILE: src/kfg.ts ---
+
+--- START OF FILE: src/index.ts ---
+export * from "./kfg";
+export * from "./kfg-driver";
+export * from "./kfg-ml";
+export * from "./model";
+export * from "./migration";
+export * from "./old";
+export * from "./drivers/env-driver";
+export * from "./drivers/json-driver";
+export * from "./drivers/sqlite-driver";
+export * from "./factory";
+export * from "./types";
+
+--- END OF FILE: src/index.ts ---
+
+--- START OF FILE: src/old.ts ---
+import { Kfg } from "./kfg";
+// import { KfgDriver } from "./kfg-driver";
+
+/**
+ * @deprecated Use Kfg instead.
+ */
+export const ConfigJS = Kfg;
+
+/**
+ * @deprecated Use KfgDriver instead.
+ */
+// export const ConfigJSDriver = KfgDriver;
+--- END OF FILE: src/old.ts ---
+
+--- START OF FILE: src/drivers/json-driver.ts ---
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { flattenObject, getProperty, unflattenObject, deepMerge } from "../utils/object";
+import { kfgDriver } from "../kfg-driver";
+import { buildDefaultObject } from "../utils/schema";
+
+// Recursively strips comment properties (e.g., "port:comment") from a nested data
+// object and returns them in a flat map, keyed by their full path.
+function stripComments(data: Record<string, any>): Record<string, string> {
+	const comments: Record<string, string> = {};
+
+	function recurse(currentData: Record<string, any>, prefix = "") {
+		const keys = Object.keys(currentData);
+		for (const key of keys) {
+			if (key.endsWith(":comment")) {
+				const dataKey = key.replace(/:comment$/, "");
+				const commentPath = prefix ? `${prefix}.${dataKey}` : dataKey;
+				comments[commentPath] = currentData[key];
+				delete currentData[key];
+			}
+		}
+		for (const key of keys) {
+			if (
+				typeof currentData[key] === "object" &&
+				currentData[key] !== null &&
+				!key.endsWith(":comment")
+			) {
+				const nestedPrefix = prefix ? `${prefix}.${key}` : key;
+				recurse(currentData[key], nestedPrefix);
+			}
+		}
+	}
+	recurse(data);
+	return comments;
+}
+
+function getFilePath(config: { path?: string }): string {
+	return path.resolve(process.cwd(), config.path || "config.json");
+}
+
+/**
+ * A driver for loading configuration from JSON files.
+ */
+export const jsonDriver = kfgDriver<{ path: string; keyroot: boolean }>((config) => {
+	let comments: Record<string, string> = {};
+
+	function save(data: any) {
+		let dataToSave: Record<string, any>;
+		if (config.keyroot) {
+			dataToSave = flattenObject(data);
+			for (const path in comments) {
+				dataToSave[`${path}:comment`] = comments[path];
+			}
+		} else {
+			const dataWithComments = JSON.parse(JSON.stringify(data));
+			for (const path in comments) {
+				const keys = path.split(".");
+				const propName = keys.pop() as string;
+				const parentPath = keys.join(".");
+				const parentObject = parentPath
+					? getProperty(dataWithComments, parentPath)
+					: dataWithComments;
+				if (typeof parentObject === "object" && parentObject !== null) {
+					parentObject[`${propName}:comment`] = comments[path];
+				}
+			}
+			dataToSave = dataWithComments;
+		}
+
+		const filePath = getFilePath(config);
+		fs.writeFileSync(filePath, JSON.stringify(dataToSave, null, 2));
+	}
+
+	return {
+		name: "json-driver",
+		async: false,
+
+		load(schema, opts) {
+			Object.assign(config, opts);
+
+			const defaultData = buildDefaultObject(schema);
+			const filePath = getFilePath(config);
+
+			let loadedData: Record<string, any> = {};
+			if (fs.existsSync(filePath)) {
+				try {
+					const fileContent = fs.readFileSync(filePath, "utf-8");
+					if (fileContent) {
+						loadedData = JSON.parse(fileContent);
+					}
+				} catch (_e) {
+					/* Ignore */
+				}
+			}
+
+			if (config.keyroot) {
+				const flatData = loadedData as Record<string, any>;
+				const cmts: Record<string, string> = {};
+				const data: Record<string, any> = {};
+				for (const key in flatData) {
+					if (key.endsWith(":comment")) {
+						cmts[key.replace(/:comment$/, "")] = flatData[key];
+					} else {
+						data[key] = flatData[key];
+					}
+				}
+				comments = cmts;
+				loadedData = unflattenObject(data);
+			} else {
+				comments = stripComments(loadedData);
+			}
+
+			return deepMerge(defaultData, loadedData);
+		},
+
+		set(key, value, options) {
+			if (!options) options = {};
+			if (key) {
+				if (options?.description) {
+					comments[key] = options.description;
+				}
+			}
+			save(options.data);
+		},
+
+		del(key, options) {
+			if (!options) options = {};
+			if (comments?.[key]) {
+				delete comments[key];
+			}
+			save(options.data);
+		},
+	};
+});
+--- END OF FILE: src/drivers/json-driver.ts ---
+
+--- START OF FILE: src/drivers/env-driver.ts ---
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { kfgDriver } from "../kfg-driver";
+import type { SchemaDefinition, TSchema } from "../types";
+import { parse, removeEnvKey, updateEnvContent } from "../utils/env";
+import { deepMerge } from "../utils/object";
+import { buildDefaultObject } from "../utils/schema";
+
+function getFilePath(config: { path?: string }): string {
+	return path.resolve(process.cwd(), config.path || ".env");
+}
+
+function coerceType(value: any, schema: TSchema) {
+	if (value === undefined) return undefined;
+
+	const type = (schema as any).type;
+	if (type === "number") return Number(value);
+	if (type === "boolean") return String(value).toLowerCase() === "true";
+
+	if (type === "array" && typeof value === "string") {
+		const trimmedValue = value.trim();
+		if (trimmedValue.startsWith("[") && trimmedValue.endsWith("]")) {
+			try {
+				return JSON.parse(trimmedValue);
+			} catch {
+				/* fallthrough */
+			}
+		}
+	}
+
+	return value;
+}
+
+function traverseSchema(
+	schema: SchemaDefinition,
+	envValues: Record<string, string>,
+	prefix: string[] = [],
+) {
+	const builtConfig: Record<string, any> = {};
+
+	for (const key in schema) {
+		const currentPath = [...prefix, key];
+		const definition = schema[key] as TSchema | SchemaDefinition;
+
+		const isTypeBoxSchema = (def: any): def is TSchema =>
+			!!def[Symbol.for("TypeBox.Kind")];
+
+		if (isTypeBoxSchema(definition)) {
+			const prop = definition.prop as string | undefined;
+			const envKey = prop || currentPath.join("_").toUpperCase();
+
+			let value: any = envValues[envKey];
+
+			if (value === undefined) {
+				value = definition.default;
+			}
+
+			if (value !== undefined) {
+				builtConfig[key] = coerceType(value, definition);
+			}
+		} else if (typeof definition === "object" && definition !== null) {
+			const nestedConfig = traverseSchema(
+				definition as SchemaDefinition,
+				envValues,
+				currentPath,
+			);
+			builtConfig[key] = nestedConfig;
+		}
+	}
+
+	return builtConfig;
+}
+
+/**
+ * A driver for loading configuration from environment variables and .env files.
+ */
+export const envDriver = kfgDriver<{ path: string }>((config) => {
+    return {
+        name: "env-driver",
+        async: false,
+        
+        load(schema, opts) {
+            Object.assign(config, opts);
+            
+            const filePath = getFilePath(config);
+            const fileContent = fs.existsSync(filePath)
+                ? fs.readFileSync(filePath, "utf-8")
+                : "";
+            const envFileValues = parse(fileContent);
+
+            const processEnv = Object.fromEntries(
+                Object.entries(process.env).filter(([, v]) => v !== undefined),
+            ) as Record<string, string>;
+
+            const allEnvValues = { ...processEnv, ...envFileValues };
+
+            const envData = traverseSchema(schema, allEnvValues);
+            const defaultData = buildDefaultObject(schema);
+
+            return deepMerge(defaultData, envData);
+        },
+
+        set(key, value, options) {
+            const envKey = key.replace(/\./g, "_").toUpperCase();
+
+            const filePath = getFilePath(config);
+            const currentContent = fs.existsSync(filePath)
+                ? fs.readFileSync(filePath, "utf-8")
+                : "";
+            const newContent = updateEnvContent(
+                currentContent,
+                envKey,
+                value,
+                options?.description,
+            );
+            fs.writeFileSync(filePath, newContent);
+        },
+
+        del(key) {
+            const envKey = key.replace(/\./g, "_").toUpperCase();
+            const filePath = getFilePath(config);
+            if (!fs.existsSync(filePath)) {
+                return;
+            }
+            const currentContent = fs.readFileSync(filePath, "utf-8");
+            const newContent = removeEnvKey(currentContent, envKey);
+            fs.writeFileSync(filePath, newContent);
+        },
+    };
+});
+--- END OF FILE: src/drivers/env-driver.ts ---
+
+--- START OF FILE: src/drivers/sqlite-driver.ts ---
+import { kfgDriver } from "../kfg-driver";
+import { flattenObject, unflattenObject } from "../utils/object";
+import { loadSqliteDatabase } from "../utils/sqlite";
+
+const KfgDatabase = await loadSqliteDatabase();
+
+export interface SqliteDriverConfig {
+	path?: string;
+	table?: string;
+	database?: string | any;
+	parents?: any[];
+	parent?: boolean;
+}
+
+function getDb(config: SqliteDriverConfig): any {
+	if (config.database && typeof config.database.prepare === "function") {
+		return config.database;
+	}
+	return new KfgDatabase(config.database || config.path || "config.db");
+}
+
+function ensureTable(db: any, table: string) {
+	db.exec(`
+        CREATE TABLE IF NOT EXISTS "${table}" (
+            key TEXT,
+            "group" TEXT,
+            type TEXT,
+            value TEXT,
+            create_at INTEGER,
+            update_at INTEGER,
+            PRIMARY KEY (key, "group")
+        )
+    `);
+}
+
+function rowToValue(row: any) {
+	let val = row.value;
+	if (row.type === "number") val = Number(val);
+	else if (row.type === "boolean") val = val === "true";
+	else if (row.type === "object" || row.type === "array") {
+		try {
+			val = JSON.parse(val);
+		} catch {
+			/* ignore */
+		}
+	}
+	return val;
+}
+
+export const sqliteDriver = kfgDriver<SqliteDriverConfig>((config) => {
+    return {
+        name: "sqlite-driver",
+        async: false,
+        model: true,
+        _db: null as any,
+
+        load(schema, opts) {
+            Object.assign(config, opts);
+            const db = getDb(config);
+            this._db = db;
+
+            const table = config.table || "settings";
+            ensureTable(db, table);
+
+            if (config.parents) {
+                for (const parent of config.parents) {
+                    if (parent && parent.driver) {
+                         parent.load({ database: db });
+                    } else if (parent && typeof parent.load === 'function') {
+                        parent.load(schema, { database: db });
+                    }
+                }
+            }
+
+            const rows = db.prepare(`SELECT * FROM "${table}"`).all() as any[];
+            const flat: Record<string, any> = {};
+            for (const row of rows) {
+                const fullPath = row.group ? `${row.group}.${row.key}` : row.key;
+                flat[fullPath] = rowToValue(row);
+            }
+            return unflattenObject(flat);
+        },
+
+        set(key, value) {
+            const db = this._db;
+            if (!db) return;
+            const table = config.table || "settings";
+            const parts = key.split(".");
+            const k = parts.pop()!;
+            const g = parts.join(".");
+            const type = Array.isArray(value) ? "array" : typeof value;
+            const valStr = type === "object" || type === "array" ? JSON.stringify(value) : String(value);
+            const now = Date.now();
+
+            db.prepare(
+                `INSERT INTO "${table}" (key, "group", type, value, create_at, update_at)
+                 VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(key, "group") DO UPDATE SET
+                    value = excluded.value,
+                    type = excluded.type,
+                    update_at = excluded.update_at`,
+            ).run(k, g, type, valStr, now, now);
+        },
+
+        del(key) {
+            const db = this._db;
+            if (!db) return;
+            const table = config.table || "settings";
+            const parts = key.split(".");
+            const k = parts.pop()!;
+            const g = parts.join(".");
+            db.prepare(
+                `DELETE FROM "${table}" WHERE key = ? AND "group" = ?`,
+            ).run(k, g);
+        },
+
+        find(schema, opts) {
+            const db = this._db || getDb(config);
+            const table = opts.model;
+            ensureTable(db, table);
+
+            const queryKeys = Object.keys(opts).filter(
+                (k) => k !== "model" && k !== "relations",
+            );
+            let ids: string[] = [];
+
+            if (queryKeys.length === 0) {
+                const rows = db
+                    .prepare(`SELECT DISTINCT "group" FROM "${table}"`)
+                    .all() as any[];
+                ids = rows.map((r: any) => r.group.split(".")[0]).filter(Boolean);
+            } else {
+                const subQueries = queryKeys.map((k) => {
+                    const val = String(opts[k]);
+                    return `SELECT DISTINCT SUBSTR("group" || '.', 1, INSTR("group" || '.', '.') - 1) as id FROM "${table}" WHERE key = '${k}' AND value = '${val}'`;
+                });
+                const rows = db.prepare(subQueries.join(" INTERSECT ")).all() as any[];
+                ids = rows.map((r: any) => r.id);
+            }
+
+            if (ids.length === 0) return null;
+
+            const id = ids[0];
+            const rows = db
+                .prepare(`SELECT * FROM "${table}" WHERE "group" = ? OR "group" LIKE ?`)
+                .all(id, `${id}.%`) as any[];
+
+            const flat: Record<string, any> = {};
+            for (const row of rows) {
+                let g = row.group;
+                if (g === id) g = "";
+                else if (g.startsWith(`${id}.`)) g = g.slice(id.length + 1);
+
+                const fullPath = g ? `${g}.${row.key}` : row.key;
+                flat[fullPath] = rowToValue(row);
+            }
+            const data = unflattenObject(flat);
+            data.id = id;
+            return data;
+        },
+
+        findBy(schema, opts) {
+            // @ts-ignore
+            return this.find(schema, opts);
+        },
+
+        create(schema, data) {
+            const db = this._db || getDb(config);
+            const table = (data as any)._model;
+            ensureTable(db, table);
+
+            const id = data.id || Math.random().toString(36).substring(2, 11);
+            const flat = flattenObject(data);
+            const now = Date.now();
+
+            for (const key in flat) {
+                if (key === "_model") continue;
+                const parts = key.split(".");
+                const k = parts.pop()!;
+                const g = [id, ...parts].join(".");
+                const value = flat[key];
+                const type = Array.isArray(value) ? "array" : typeof value;
+                const valStr = type === "object" || type === "array" ? JSON.stringify(value) : String(value);
+
+                db.prepare(
+                    `INSERT INTO "${table}" (key, "group", type, value, create_at, update_at)
+                     VALUES (?, ?, ?, ?, ?, ?)`,
+                ).run(k, g, type, valStr, now, now);
+            }
+            data.id = id;
+            return data;
+        },
+
+        update(schema, id, data) {
+            const db = this._db || getDb(config);
+            const table = (data as any)._model;
+            ensureTable(db, table);
+
+            const flat = flattenObject(data);
+            const now = Date.now();
+
+            for (const key in flat) {
+                if (key === "_model" || key === "id") continue;
+                const parts = key.split(".");
+                const k = parts.pop()!;
+                const g = [id, ...parts].join(".");
+                const value = flat[key];
+                const type = Array.isArray(value) ? "array" : typeof value;
+                const valStr = type === "object" || type === "array" ? JSON.stringify(value) : String(value);
+
+                db.prepare(
+                    `INSERT INTO "${table}" (key, "group", type, value, create_at, update_at)
+                     VALUES (?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(key, "group") DO UPDATE SET
+                        value = excluded.value,
+                        type = excluded.type,
+                        update_at = excluded.update_at`,
+                ).run(k, g, type, valStr, now, now);
+            }
+            return data;
+        },
+
+        delete(schema, id, opts) {
+            const db = this._db || getDb(config);
+            const table = opts.model;
+            if (!table) throw new Error("Model name not provided for delete");
+            ensureTable(db, table);
+
+            db.prepare(`DELETE FROM "${table}" WHERE "group" = ? OR "group" LIKE ?`).run(
+                id,
+                `${id}.%`,
+            );
+        }
+
+    };
+});
+--- END OF FILE: src/drivers/sqlite-driver.ts ---
+
+--- START OF FILE: src/kfg-ml.ts ---
+import type { Driver, DriverFactory } from "./types";
+import type { Model } from "./model";
+import type { Migration } from "./migration";
+
+export interface KfgMLOptions {
+	models: Model<any>[];
+    migrations?: Migration[];
+}
+
+export class KfgML<D extends Driver<any>> {
+    public driver: D;
+    public factory: DriverFactory<any, any>;
+    public models: Model<any>[];
+    public migrations: Migration[];
+
+	constructor(
+		driverOrFactory: D | DriverFactory<any, any>,
+		public options: KfgMLOptions,
+	) {
+        if (typeof driverOrFactory === 'function') {
+            this.factory = driverOrFactory;
+            this.driver = driverOrFactory({}) as D;
+        } else {
+            this.driver = driverOrFactory;
+            this.factory = () => driverOrFactory; 
+        }
+        this.models = options.models;
+        this.migrations = options.migrations || [];
+		this.init();
+	}
+
+	private init() {
+		for (const model of this.models) {
+			model.setDriver(this.driver, this.factory);
+		}
+	}
+
+    public getModel(name: string): Model<any> | undefined {
+        return this.models.find(m => m.name === name);
+    }
+
+    public async migrate() {
+        // Simple implementation: run all migrations in sequence
+        // In a real scenario, we'd check which ones were already run.
+        for (const migration of this.migrations) {
+            console.log(`[KfgML] Running migration: ${migration.name}`);
+            await migration.up(this.driver);
+        }
+    }
+}
+
+--- END OF FILE: src/kfg-ml.ts ---
+
+--- START OF FILE: src/utils/schema.ts ---
+import {
+	type TObject,
+	type TProperties,
+	type TSchema,
+	Type,
+} from "@sinclair/typebox";
+import { Value } from "@sinclair/typebox/value";
+import type { SchemaDefinition } from "../types";
+/**
+ * Adds smart defaults to a TypeBox schema.
+ * @param schemaNode The schema to add the defaults to.
+ */
+export function addSmartDefaults(schemaNode: TObject): void {
+	if (schemaNode.type !== "object" || !schemaNode.properties) {
+		return;
+	}
+	let allChildrenOptional = true;
+	for (const key in schemaNode.properties) {
+		const prop = schemaNode.properties[key];
+
+		// Ignore Unsafe schemas (used by cfs) as they are not standard TypeBox schemas
+		if (prop[Symbol.for("TypeBox.Kind") as any] === "Unsafe") {
+			continue;
+		}
+
+		// Only recurse if the property is a valid TypeBox object schema
+		if (prop.type === "object" && prop[Symbol.for("TypeBox.Kind") as any]) {
+			addSmartDefaults(prop as TObject);
+		}
+		const hasDefault = prop.default !== undefined;
+		// Behavioral check for optionality
+		const isOptional = Value.Check(Type.Object({ temp: prop }), {});
+		if (!hasDefault && !isOptional) {
+			allChildrenOptional = false;
+		}
+	}
+	if (allChildrenOptional && schemaNode.default === undefined) {
+		(schemaNode as any).default = {};
+	}
+}
+/**
+ * Builds a TypeBox schema from a schema definition.
+ * @param definition The schema definition.
+ * @returns The TypeBox schema.
+ */
+export function buildTypeBoxSchema(definition: SchemaDefinition): TObject {
+	if (definition[Symbol.for("TypeBox.Kind") as any] === "Object") {
+		return definition as TObject;
+	}
+
+	const properties: TProperties = {};
+	for (const key in definition) {
+		const value = definition[key] as any;
+
+		const isObject =
+			typeof value === "object" &&
+			value !== null &&
+			!value[Symbol.for("TypeBox.Kind")];
+		if (isObject) {
+			properties[key] = buildTypeBoxSchema(value);
+		} else {
+			properties[key] = value as TSchema;
+		}
+	}
+	return Type.Object(properties, { additionalProperties: true });
+}
+
+/**
+ * Builds a default object from a schema definition.
+ * It converts the definition to a TypeBox schema, adds smart defaults,
+ * and then generates the default value using TypeBox's Value.Default.
+ * This ensures that nested defaults and priorities are handled correctly.
+ * @param definition The schema definition.
+ * @returns The default object.
+ */
+export function buildDefaultObject(
+	definition: SchemaDefinition,
+): Record<string, any> {
+	const schema = buildTypeBoxSchema(definition);
+	addSmartDefaults(schema);
+	return Value.Default(schema, {}) as Record<string, any>;
+}
+
+/**
+ * Makes a schema optional.
+ * @param definition The schema definition.
+ * @returns The optional schema.
+ */
+export function makeSchemaOptional(
+	definition: SchemaDefinition,
+): SchemaDefinition {
+	const newDefinition: Record<string, any> = {};
+	for (const key in definition) {
+		const value = (definition as any)[key];
+		if (value?.[Symbol.for("TypeBox.Kind")]) {
+			const schema = value as TSchema & { important?: boolean };
+			const isOptional = Value.Check(Type.Object({ temp: schema }), {});
+			if (schema.important || isOptional) {
+				newDefinition[key] = schema;
+			} else {
+				newDefinition[key] = Type.Optional(schema);
+			}
+		} else if (typeof value === "object" && value !== null) {
+			newDefinition[key] = makeSchemaOptional(value);
+		} else {
+			newDefinition[key] = value;
+		}
+	}
+	return newDefinition;
+}
+
+--- END OF FILE: src/utils/schema.ts ---
+
+--- START OF FILE: src/utils/object.ts ---
+/**
+ * Gets a property from an object using a dot-separated path.
+ * @param obj The object to get the property from.
+ * @param path The path to the property.
+ * @returns The property value.
+ */
+export function getProperty<T extends Record<string, any>>(
+	obj: T,
+	path: string,
+): any {
+	return path.split(".").reduce((acc, key) => acc?.[key], obj);
+}
+
+/**
+ * Sets a property on an object using a dot-separated path.
+ * @param obj The object to set the property on.
+ * @param path The path to the property.
+ * @param value The value to set.
+ */
+export function setProperty<T extends Record<string, any>>(
+	obj: T,
+	path: string,
+	value: any,
+): void {
+	const keys = path.split(".");
+	const lastKey = keys.pop() as string;
+	let target: any = obj;
+	for (const key of keys) {
+		if (target[key] === undefined || target[key] === null) {
+			target[key] = {};
+		} else if (typeof target[key] !== "object") {
+			throw new Error(`Cannot set property on non-object at path: ${key}`);
+		}
+		target = target[key];
+	}
+	target[lastKey] = value;
+}
+
+/**
+ * Checks if an item is an object.
+ * @param item The item to check.
+ * @returns True if the item is an object, false otherwise.
+ */
+export function isObject(item: any): item is Record<string, any> {
+	return item !== null && typeof item === "object" && !Array.isArray(item);
+}
+
+/**
+ * Deeply merges two objects.
+ * @param target The target object.
+ * @param source The source object.
+ * @returns The merged object.
+ */
+export function deepMerge<T extends object, U extends object>(
+	target: T,
+	source: U,
+): T & U {
+	const output = { ...target } as T & U;
+
+	if (isObject(target) && isObject(source)) {
+		Object.keys(source).forEach((key) => {
+			const sourceValue = source[key as keyof U];
+			const targetValue = target[key as keyof T];
+
+			if (isObject(sourceValue) && isObject(targetValue)) {
+				(output as any)[key] = deepMerge(
+					targetValue as object,
+					sourceValue as object,
+				);
+			} else {
+				(output as any)[key] = sourceValue;
+			}
+		});
+	}
+
+	return output;
+}
+
+/**
+ * Flattens a nested object into a single-level object.
+ * @param obj The object to flatten.
+ * @param prefix The prefix to use for the keys.
+ * @returns The flattened object.
+ */
+export function flattenObject(
+	obj: Record<string, any>,
+	prefix = "",
+): Record<string, any> {
+	return Object.keys(obj).reduce(
+		(acc, k) => {
+			const pre = prefix.length ? `${prefix}.` : "";
+			if (isObject(obj[k])) {
+				Object.assign(acc, flattenObject(obj[k], pre + k));
+			} else {
+				acc[pre + k] = obj[k];
+			}
+			return acc;
+		},
+		{} as Record<string, any>,
+	);
+}
+
+/**
+ * Unflattens a single-level object into a nested object.
+ * @param obj The object to unflatten.
+ * @returns The unflattened object.
+ */
+export function unflattenObject(obj: Record<string, any>): Record<string, any> {
+	const result = {};
+	for (const key in obj) {
+		setProperty(result, key, obj[key]);
+	}
+	return result;
+}
+
+/**
+ * Deletes a property from an object using a dot-separated path.
+ * @param obj The object to delete the property from.
+ * @param path The path to the property.
+ * @returns True if the property was deleted, false otherwise.
+ */
+export function deleteProperty<T extends Record<string, any>>(
+	obj: T,
+	path: string,
+): boolean {
+	const keys = path.split(".");
+	const lastKey = keys.pop() as string;
+	let target: any = obj;
+	for (const key of keys) {
+		if (target?.[key] === undefined) {
+			return false;
+		}
+		target = target[key];
+	}
+	if (typeof target === "object" && target !== null) {
+		return delete target[lastKey];
+	}
+	return false;
+}
+
+--- END OF FILE: src/utils/object.ts ---
+
+--- START OF FILE: src/utils/env.ts ---
+/**
+ * Parses a .env file content string into a key-value object.
+ * This version uses a simpler regex and post-processing for clarity.
+ * Note: Does not support multi-line values.
+ * @param content The string content of the .env file.
+ * @returns A record of key-value pairs.
+ */
+export function parse(content: string): Record<string, string> {
+	const result: Record<string, string> = {};
+	const lines = content.split(/\r?\n/);
+
+	for (const line of lines) {
+		const trimmedLine = line.trim();
+		if (!trimmedLine || trimmedLine.startsWith("#")) {
+			continue;
+		}
+
+		const match = trimmedLine.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.*)$/);
+		if (!match) continue; // Ignore invalid lines as per common implementations
+
+		const [, key, rawValue] = match;
+		let value = rawValue.trim();
+
+		// Strip end-of-line comments, unless in quotes
+		if (!value.startsWith('"') && !value.startsWith("'")) {
+			const commentIndex = value.indexOf("#");
+			if (commentIndex > -1) {
+				value = value.substring(0, commentIndex).trim();
+			}
+		}
+
+		// Unquote values
+		if (value.startsWith("'") && value.endsWith("'")) {
+			value = value.substring(1, value.length - 1);
+		} else if (value.startsWith('"') && value.endsWith('"')) {
+			value = value.substring(1, value.length - 1);
+		}
+
+		result[key] = value;
+	}
+	return result;
+}
+
+/**
+ * Updates a .env file content string with a new key-value pair.
+ * Preserves comments and formatting.
+ * @param content The original file content.
+ * @param key The key to update.
+ * @param value The new value.
+ * @param description Optional description to add as a comment.
+ * @returns The updated file content.
+ */
+export function updateEnvContent(
+	content: string,
+	key: string,
+	value: unknown,
+	description?: string,
+): string {
+	const lines = content.split(/\r?\n/);
+	let keyFound = false;
+	const newLines = [...lines];
+
+	let formattedValue: string;
+	if (Array.isArray(value)) {
+		formattedValue = JSON.stringify(value);
+	} else {
+		const stringValue = String(value);
+		formattedValue = /[\s"'#]/.test(stringValue)
+			? `"${stringValue.replace(/"/g, '"').replace(/\n/g, "\\n")}"`
+			: stringValue;
+	}
+
+	let lineIndex = -1;
+	for (let i = 0; i < lines.length; i++) {
+		if (new RegExp(`^s*${key}s*=s*`).test(lines[i])) {
+			keyFound = true;
+			lineIndex = i;
+			break;
+		}
+	}
+
+	if (keyFound) {
+		// Key exists, update it.
+		newLines[lineIndex] = `${key}=${formattedValue}`;
+		// Check for description and add if it's not there.
+		if (description) {
+			const comment = `# ${description}`;
+			if (
+				lineIndex === 0 ||
+				!newLines[lineIndex - 1].trim().startsWith(comment)
+			) {
+				if (lineIndex > 0 && !newLines[lineIndex - 1].trim().startsWith("#")) {
+					newLines.splice(lineIndex, 0, comment);
+				}
+			}
+		}
+	} else {
+		// Key doesn't exist, add it to the end.
+		if (newLines[newLines.length - 1] !== "") {
+			newLines.push(""); // Add a blank line for separation
+		}
+		if (description) {
+			newLines.push(`# ${description}`);
+		}
+		newLines.push(`${key}=${formattedValue}`);
+	}
+
+	return newLines.join("\n");
+}
+
+/**
+ * Removes a key from a .env file content string.
+ * @param content The original file content.
+ * @param key The key to remove.
+ * @returns The updated file content.
+ */
+export function removeEnvKey(content: string, key: string): string {
+	const lines = content.split(/\r?\n/);
+	const keyRegex = new RegExp(`^\\s*${key}\\s*=\\s*`);
+	const newLines: string[] = [];
+
+	for (const line of lines) {
+		if (keyRegex.test(line)) {
+			// key found, don't add it.
+			// if last line in newLines is a comment, remove it.
+			if (
+				newLines.length > 0 &&
+				newLines[newLines.length - 1].trim().startsWith("#")
+			) {
+				newLines.pop();
+			}
+		} else {
+			newLines.push(line);
+		}
+	}
+	return newLines.join("\n");
+}
+
+--- END OF FILE: src/utils/env.ts ---
+
+--- START OF FILE: src/utils/sqlite.ts ---
+import type { Statement } from "bun:sqlite";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+
+type BunSqlite = typeof import('bun:sqlite').Database;
+type NodeSqlite = typeof import('node:sqlite').DatabaseSync;
+type BetterSqlite = typeof import('better-sqlite3');
+
+export async function loadSqliteDatabase() {
+    const firsttry = (typeof Bun !== "undefined") ? "bun:sqlite" : "node:sqlite";
+    let sqlite: (BunSqlite | NodeSqlite | BetterSqlite);
+    let moduleType: string;
+
+    try {
+        if (firsttry === "bun:sqlite") {
+             const m = await import("bun:sqlite");
+             sqlite = m.Database;
+             moduleType = "bun:sqlite";
+        } else {
+             const m = await import("node:sqlite");
+             sqlite = m.DatabaseSync;
+             moduleType = "node:sqlite";
+        }
+    } catch {
+        try {
+            // not supported use module better-sqlite3
+            const m = await import("better-sqlite3");
+            sqlite = m?.default || m;
+            moduleType = "better-sqlite3";
+        } catch {
+            throw new Error("Bun, node and better-sqlite3 database not found, update your environment");
+        }
+    }
+
+    return class KfgDatabase {
+        db: InstanceType<BunSqlite | NodeSqlite> | import('better-sqlite3').Database;
+        module_type: string;
+
+        constructor(path: string) {
+            this.module_type = moduleType;
+            const dir = dirname(path);
+            if (!existsSync(dir) && path !== ":memory:") {
+                mkdirSync(dir, { recursive: true });
+            }
+            
+            this.db = new sqlite(path);
+        }
+
+        exec(sql: string): void {
+            this.db.exec(sql);
+        }
+
+        prepare(sql: string) {
+            const stmt = (this.db as any).prepare(sql) as Statement;
+            
+            return {
+                all: (...params: any[]) => {
+                    return stmt.all(...params);
+                },
+                get: (...params: any[]) => {
+                    return stmt.get(...params);
+                },
+                run: (...params: any[]) => {
+                    return stmt.run(...params);
+                },
+                finalize: () => {
+                    if ("finalize" in stmt) stmt.finalize();
+                }
+            };
+        }
+        
+        close() {
+            this.db.close();
+        }
+    }
+}
+--- END OF FILE: src/utils/sqlite.ts ---
+
+--- START OF FILE: src/kfg-driver.ts ---
+import { Value } from "@sinclair/typebox/value";
+import type { Driver, DriverConfig, DriverFactory, SchemaDefinition, inPromise } from "./types";
+import { addSmartDefaults, buildTypeBoxSchema } from "./utils/schema";
+import { getProperty, setProperty, deleteProperty, deepMerge } from "./utils/object";
+
+/**
+ * Creates a new Kfg Driver factory.
+ * @param factory The factory function that initializes the driver logic.
+ */
+export function kfgDriver<C extends DriverConfig = any>(
+	factory: (opts: Partial<C>) => Omit<Driver<any>, "load" | "set" | "del" | "has" | "inject" | "get"> &
+             Partial<Pick<Driver<any>, "load" | "set" | "del" | "has" | "inject" | "get">>
+): DriverFactory<C, any> {
+	return (config: Partial<C>) => {
+		const partialDriver = factory(config);
+		const async = partialDriver.async;
+        let _data: any = {};
+
+		const driver: Driver<any> = {
+			...partialDriver,
+            
+			load(schema: SchemaDefinition, opts?: any): inPromise<boolean, any> {
+                const validate = (data: any) => {
+                     const compiledSchema = buildTypeBoxSchema(schema);
+                     addSmartDefaults(compiledSchema);
+                     const configWithDefaults = Value.Default(compiledSchema, data) as any;
+                     Value.Convert(compiledSchema, configWithDefaults);
+                     
+                     if (!Value.Check(compiledSchema, configWithDefaults)) {
+                        const errors = [...Value.Errors(compiledSchema, configWithDefaults)];
+                        throw new Error(
+                            `[Kfg] Validation failed:\n${errors
+                                .map((e) => `- ${e.path}: ${e.message}`)
+                                .join("\n")}`,
+                        );
+                    }
+                    return configWithDefaults;
+                }
+
+                const runLoad = () => {
+                    if (partialDriver.load) {
+                        const result = partialDriver.load.call(driver, schema, opts);
+                        if (async) {
+                            return (result as Promise<any>).then(res => {
+                                const validated = validate(res);
+                                _data = validated;
+                                return validated;
+                            }) as any;
+                        }
+                        const validated = validate(result);
+                        _data = validated;
+                        return validated;
+                    }
+                    return (async ? Promise.resolve(validate(_data)) : validate(_data)) as any;
+                };
+
+                if (partialDriver.onRequest) {
+                    const req = partialDriver.onRequest.call(driver);
+                    if (async) return (req as Promise<void>).then(() => runLoad());
+                    return runLoad();
+                }
+                return runLoad();
+			},
+
+			get(key?: string): inPromise<boolean, any> {
+                const runGet = () => {
+                    if (partialDriver.get) return partialDriver.get.call(driver, key);
+                    if (!key) return _data;
+                    return getProperty(_data, key);
+                };
+                if (partialDriver.onRequest) {
+                    const req = partialDriver.onRequest.call(driver);
+                    if (async) return (req as Promise<void>).then(() => runGet());
+                    return runGet();
+                }
+                return runGet();
+            },
+
+			set(key: string, value: any, options?: any): inPromise<boolean, void> {
+                const runSet = () => {
+                    setProperty(_data, key, value);
+                    if (partialDriver.set) {
+                        return partialDriver.set.call(driver, key, value, options);
+                    }
+                    return (async ? Promise.resolve() : undefined) as any;
+                };
+
+                if (partialDriver.onRequest) {
+                    const req = partialDriver.onRequest.call(driver);
+                    if (async) return (req as Promise<void>).then(() => runSet());
+                    return runSet();
+                }
+                return runSet();
+			},
+
+            has(...keys: string[]): inPromise<boolean, boolean> {
+                const runHas = () => {
+                    if (partialDriver.has) return partialDriver.has.call(driver, ...keys);
+                    return keys.every(key => getProperty(_data, key) !== undefined);
+                };
+                if (partialDriver.onRequest) {
+                    const req = partialDriver.onRequest.call(driver);
+                    if (async) return (req as Promise<void>).then(() => runHas());
+                    return runHas();
+                }
+                return runHas();
+            },
+
+			del(key: string, options?: any): inPromise<boolean, void> {
+                const runDel = () => {
+                    deleteProperty(_data, key);
+                    if (partialDriver.del) {
+                        return partialDriver.del.call(driver, key, options);
+                    }
+                    return (async ? Promise.resolve() : undefined) as any;
+                };
+
+                if (partialDriver.onRequest) {
+                    const req = partialDriver.onRequest.call(driver);
+                    if (async) return (req as Promise<void>).then(() => runDel());
+                    return runDel();
+                }
+                return runDel();
+			},
+
+            inject(data: any): inPromise<boolean, void> {
+                const runInject = () => {
+                    _data = deepMerge(_data, data);
+                    if (partialDriver.inject) return partialDriver.inject.call(driver, data);
+                    return (async ? Promise.resolve() : undefined) as any;
+                };
+                if (partialDriver.onRequest) {
+                    const req = partialDriver.onRequest.call(driver);
+                    if (async) return (req as Promise<void>).then(() => runInject());
+                    return runInject();
+                }
+                return runInject();
+            },
+            
+            unmount() {
+                if (partialDriver.unmount) {
+                    partialDriver.unmount.call(driver);
+                }
+            }
+		};
+
+		return driver;
+	};
+}
+
+// For compatibility if needed
+export type KfgDriver<C, S, A> = Driver<boolean>;
+--- END OF FILE: src/kfg-driver.ts ---
+
+--- START OF FILE: src/model.ts ---
+import { Kfg } from "./kfg";
+import type { Driver, DriverFactory, SchemaDefinition, StaticSchema, inPromise } from "./types";
+
+export interface ModelOptions<S extends SchemaDefinition> {
+    name: string;
+    type?: 'many' | 'one';
+    unique?: string;
+    schema: S;
+    onCreate?: (data: any) => any;
+    onUpdate?: (data: any) => any;
+    onDelete?: (data: any) => any;
+}
+
+export class Model<S extends SchemaDefinition> {
+    public name: string;
+    public type: 'many' | 'one' = 'many';
+    public unique: string = 'id';
+    public schema: S;
+    public driver?: Driver<any>;
+    public factory?: DriverFactory<any, any>;
+    
+    private onCreate?: (data: any) => any;
+    private onUpdate?: (data: any) => any;
+    private onDelete?: (data: any) => any;
+
+    constructor(nameOrOptions: string | ModelOptions<S>) {
+        if (typeof nameOrOptions === 'string') {
+            this.name = nameOrOptions;
+            this.schema = {} as S;
+        } else {
+            this.name = nameOrOptions.name;
+            this.type = nameOrOptions.type || 'many';
+            this.unique = nameOrOptions.unique || 'id';
+            this.schema = nameOrOptions.schema;
+            this.onCreate = nameOrOptions.onCreate;
+            this.onUpdate = nameOrOptions.onUpdate;
+            this.onDelete = nameOrOptions.onDelete;
+        }
+    }
+
+    public setDriver(driver: Driver<any>, factory: DriverFactory<any, any>) {
+        this.driver = driver;
+        this.factory = factory;
+    }
+
+    private checkDriver() {
+        if (!this.driver || !this.factory) {
+            throw new Error(`[Model ${this.name}] Driver or Factory not set. Use KfgML to load the model.`);
+        }
+    }
+
+    public find(query: any): inPromise<boolean, Kfg<any, S>> {
+        this.checkDriver();
+        
+        const result = this.driver!.find!(this.schema, {
+            ...query,
+            model: this.name
+        });
+
+        const createInstance = (data: any) => {
+            if (!data) return null;
+            
+            // Create a fresh driver instance for the record using the factory
+            const recordDriver = this.factory!({});
+
+            const kfg = new Kfg(recordDriver, this.schema);
+            kfg.hydrate(data);
+            return kfg;
+        };
+
+        if (this.driver!.async) {
+            return (result as Promise<any>).then(createInstance) as any;
+        }
+        return createInstance(result) as any;
+    }
+    
+    public findBy(field: string, value: any): inPromise<boolean, Kfg<any, S>> {
+        return this.find({ [field]: value });
+    }
+
+    public create(data: Partial<StaticSchema<S>>): inPromise<boolean, Kfg<any, S>> {
+        this.checkDriver();
+        
+        const result = this.driver!.create!(this.schema, {
+            ...data,
+            _model: this.name
+        });
+
+        const createInstance = (data: any) => {
+            const recordDriver = this.factory!({});
+            const kfg = new Kfg(recordDriver, this.schema);
+            kfg.hydrate(data);
+            return kfg;
+        };
+
+        if (this.driver!.async) {
+            return (result as Promise<any>).then(createInstance) as any;
+        }
+        return createInstance(result) as any;
+    }
+
+    public update(id: string | number, data: Partial<StaticSchema<S>>): inPromise<boolean, void> {
+        this.checkDriver();
+        return this.driver!.update!(this.schema, id, {
+            ...data,
+            _model: this.name
+        }) as any;
+    }
+
+    public delete(id: string | number): inPromise<boolean, void> {
+        this.checkDriver();
+        return this.driver!.delete!(this.schema, id) as any;
+    }
+}
+--- END OF FILE: src/model.ts ---
+
+--- START OF FILE: src/types.ts ---
+import type {
+	SchemaOptions,
+	Static,
+	TObject,
+	TSchema,
+	TUnsafe,
+} from "@sinclair/typebox";
+export type { TSchema, TObject, SchemaOptions };
+
+import type { Model } from "./model";
+import type { KfgML } from "./kfg-ml";
+
+// --- Driver Related Types ---
+
+/**
+ * Represents a path to a value in an object.
+ * @template T The type of the object.
+ */
+export type Paths<T> = T extends object
+	? {
+			[K in keyof T]: K extends string
+				? T[K] extends ReadonlyArray<any>
+					? K
+					: T[K] extends object
+						? `${K}.${Paths<T[K]>}` | K
+						: K
+				: never;
+		}[keyof T]
+	: never;
+
+/**
+ * Represents a path to a value in an object.
+ * @template T The type of the object.
+ */
+export type RootPaths<T> = T extends object
+	? {
+			[K in keyof T]: K extends string
+				? T[K] extends ReadonlyArray<any>
+					? K
+					: T[K] extends object
+						? K | `${K}.${RootPaths<T[K]>}`
+						: never
+				: never;
+		}[keyof T]
+	: never;
+
+/**
+ * Gets the type of a value at a given path in an object.
+ * @template T The type of the object.
+ * @template P The path to the value.
+ */
+export type DeepGet<T, P extends string> = P extends `${infer K}.${infer R}`
+	? K extends keyof T
+		? DeepGet<T[K], R>
+		: never
+	: P extends keyof T
+		? T[P]
+		: never;
+
+/**
+ * Represents a value that can be a promise or a plain value.
+ * @template Async The type of the async flag.
+ * @template Result The type of the result.
+ */
+export type inPromise<Async extends boolean, Result> = Async extends true
+	? Promise<Result>
+	: Result;
+
+/**
+ * Represents the configuration of a driver.
+ */
+export type DriverConfig = Record<any, any>;
+
+/**
+ * The interface for a Functional Driver instance.
+ * @template A Async flag
+ */
+export interface Driver<A extends boolean> {
+	name: string;
+	async: A;
+	model?: boolean;
+
+	load(schema: SchemaDefinition, opts?: any): inPromise<A, any>;
+	get(key?: string): inPromise<A, any>;
+	set(key: string, value: any, options?: { description?: string, data?: any }): inPromise<A, void>;
+	has(...keys: string[]): inPromise<A, boolean>;
+	del(key: string, options?: { data?: any }): inPromise<A, void>;
+    inject(data: any): inPromise<A, void>;
+
+    /** Called before operations like get, set, del, etc. */
+    onRequest?(): inPromise<A, void>;
+    /** Called when the driver is no longer needed or updated. */
+    unmount?(): void;
+
+	// Optional Model methods
+	find?(schema: SchemaDefinition, opts: any): any;
+	findBy?(schema: SchemaDefinition, opts: any): any;
+	create?(schema: SchemaDefinition, data: any): any;
+	update?(schema: SchemaDefinition, id: any, data: any): any;
+	delete?(schema: SchemaDefinition, id: any): any;
+}
+
+/**
+ * Factory function type to create a driver.
+ */
+export type DriverFactory<C extends DriverConfig, A extends boolean> = (
+	config: Partial<C>,
+) => Driver<A>;
+
+
+// --- Schema Related Types ---
+
+/**
+ * A recursive type representing the user-friendly schema definition.
+ */
+export type SchemaDefinition =
+	| TSchema // Qualquer schema TypeBox válido (string, number, array, etc.)
+	| {
+			[key: string]: SchemaDefinition;
+	  };
+/**
+ * A mapped type que converte um SchemaDefinition em tipo estático TypeScript.
+ * Agora com suporte a arrays do TypeBox.
+ */
+export type StaticSchema<T> =
+	// Se for um array TypeBox, transforma no tipo do item[]
+	T extends { type: "array"; items: infer I }
+		? StaticSchema<I>[]
+		: // Se for qualquer TSchema simples
+			T extends TSchema
+			? Static<T>
+			: // Se for um objeto SchemaDefinition, aplica recursivamente
+				T extends SchemaDefinition
+				? { -readonly [K in keyof T]: StaticSchema<T[K]> }
+				: never;
+
+/**
+ * Custom metadata properties that can be added to a schema.
+ */
+export interface CustomOptions<Default = any> {
+	description?: string;
+	default?: Default;
+	important?: boolean;
+	initial_save?: boolean;
+	prop?: string;
+	refines?: ((value: unknown) => boolean | string)[];
+    model?: Model<any>;
+    createms?: boolean;
+}
+--- END OF FILE: src/types.ts ---
+
+--- START OF FILE: src/factory.ts ---
+import {
+	type ArrayOptions,
+	type NumberOptions,
+	type ObjectOptions,
+	type SchemaOptions,
+	type StringOptions,
+	type TLiteral,
+	type TProperties,
+	type TSchema,
+	type TUnion,
+	Type,
+} from "@sinclair/typebox";
+import type { CustomOptions } from "./types";
+
+// Helper function to extract values from string arrays, const arrays, or enums
+function getEnumValues<T extends readonly (string | number)[] | object>(
+	values: T,
+): (string | number)[] {
+	if (Array.isArray(values)) {
+		return values as (string | number)[];
+	}
+	// For enums, filter out numeric keys if it's a numeric enum
+	const isNumericEnum = Object.values(values).some(
+		(v) => typeof v === "number",
+	);
+	if (isNumericEnum) {
+		return Object.values(values).filter(
+			(v) => typeof v === "number",
+		) as number[];
+	}
+	return Object.values(values).filter((v) => typeof v === "string") as string[];
+}
+
+const _c = {
+	/** Creates a String schema. */
+	String: <TDefault extends string>(
+		options?: StringOptions & CustomOptions<TDefault>,
+	) => Type.String(options),
+
+	/** Creates a Number schema. */
+	Number: <TDefault extends number>(
+		options?: NumberOptions & CustomOptions<TDefault>,
+	) => Type.Number(options),
+
+	/** Creates a Boolean schema. */
+	Boolean: <TDefault extends boolean>(
+		options?: Omit<SchemaOptions, "default"> & CustomOptions<TDefault>,
+	) => Type.Boolean(options),
+
+	/** Creates an Object schema. */
+	Object: <
+		Properties extends TProperties,
+		TDefault extends Record<string, any>,
+	>(
+		properties: Properties,
+		options?: ObjectOptions & CustomOptions<TDefault>,
+	) => Type.Object(properties, options),
+
+	/** Creates an Array schema. */
+	Array: <Schema extends TSchema, TDefault extends any[]>(
+		items: Schema,
+		options?: ArrayOptions & CustomOptions<TDefault>,
+	) => Type.Array(items, options),
+
+	/** Creates a Record schema. */
+	Record: <
+		K extends TSchema,
+		V extends TSchema,
+		TDefault extends Record<string, any>,
+	>(
+		key: K,
+		value: V,
+		options?: Omit<SchemaOptions, "default"> & CustomOptions<TDefault>,
+	) => Type.Record(key, value, options),
+
+	/** Creates a Union of Literals from a string array, const array, or a TypeScript enum. */
+	Enum: <
+		T extends readonly (string | number)[] | object,
+		TValues = T extends readonly (infer U)[]
+			? U
+			: T extends object
+				? T[keyof T]
+				: never,
+	>(
+		values: T,
+		options?: CustomOptions<TValues> & Omit<SchemaOptions, "default">,
+		//@ts-expect-error ignore
+	): TUnion<TLiteral<TValues>[]> => {
+		const enumValues = getEnumValues(values);
+		return Type.Union(
+			enumValues.map((v) => Type.Literal(v)),
+			options,
+			//@ts-expect-error ignore
+		) as TUnion<TLiteral<TValues>[]>;
+	},
+
+	/** Creates a string schema with 'ipv4' format. */
+	IP: <TDefault extends string>(
+		options?: StringOptions & CustomOptions<TDefault>,
+	) => Type.String({ ...options, format: "ipv4" }),
+
+	/** Creates a string schema with 'ipv6' format. */
+	IPv6: <TDefault extends string>(
+		options?: StringOptions & CustomOptions<TDefault>,
+	) => Type.String({ ...options, format: "ipv6" }),
+
+	/** Creates a string schema with 'email' format. */
+	Email: <TDefault extends string>(
+		options?: StringOptions & CustomOptions<TDefault>,
+	) => Type.String({ ...options, format: "email" }),
+
+	/** Creates a string schema with 'uri' format. */
+	URL: <TDefault extends string>(
+		options?: StringOptions & CustomOptions<TDefault>,
+	) => Type.String({ ...options, format: "uri" }),
+
+	/** Creates an Any schema. */
+	Any: () => Type.Any(),
+
+	/** Creates an Optional schema. */
+	Optional: <Schema extends TSchema>(schema: Schema) => Type.Optional(schema),
+
+	/** Creates a Number schema that defaults to a random value if not provided. */
+	Random: (options?: NumberOptions & { max?: number }) => {
+		const { max = 100, ...rest } = options || {};
+		return Type.Number({
+			...rest,
+			[Symbol.for("isRandom")]: true,
+			max,
+		});
+	},
+
+    /** Creates a Model relation schema. */
+    Model: (
+        model: any,
+        resolver?: (instance: any) => any,
+        options?: CustomOptions<any>
+    ) => {
+        return Type.Any({
+            ...options,
+            model,
+            resolver
+        });
+    },
+
+    /** Creates a number schema that defaults to current timestamp in ms. */
+    createms: (options?: NumberOptions & CustomOptions<number>) => {
+        return Type.Number({
+            ...options,
+            createms: true,
+            default: Date.now()
+        });
+    }
+};
+
+/**
+ * A helper object for creating schema definitions with custom metadata.
+ * Includes both PascalCase and camelCase versions of helpers.
+ */
+export const c = {
+	..._c,
+	string: _c.String,
+	number: _c.Number,
+	boolean: _c.Boolean,
+	object: _c.Object,
+	array: _c.Array,
+	record: _c.Record,
+	enum: _c.Enum,
+	ip: _c.IP,
+	ipv6: _c.IPv6,
+	email: _c.Email,
+	url: _c.URL,
+	any: _c.Any,
+	optional: _c.Optional,
+	random: _c.Random,
+    model: _c.Model,
+    createms: _c.createms,
+};
+export const k = c;
+export const m = c;
+--- END OF FILE: src/factory.ts ---
+
+--- START OF FILE: src/migration.ts ---
+import type { Driver } from "./types";
+import type { KfgML } from "./kfg-ml";
+
+export interface MigrationOptions {
+    name: string;
+    up: (driver: Driver<any>) => void | Promise<void>;
+    down: (ml: KfgML<any>) => void | Promise<void>;
+}
+
+export class Migration {
+    public name: string;
+    public up: (driver: Driver<any>) => void | Promise<void>;
+    public down: (ml: KfgML<any>) => void | Promise<void>;
+
+    constructor(options: MigrationOptions) {
+        this.name = options.name;
+        this.up = options.up;
+        this.down = options.down;
+    }
+}
+
+--- END OF FILE: src/migration.ts ---

@@ -1,6 +1,5 @@
 import { Kfg } from "./kfg";
-import { KfgFS, KfgFileFS } from "./kfg-fs";
-import { KfgDriver } from "./kfg-driver";
+// import { KfgDriver } from "./kfg-driver";
 
 /**
  * @deprecated Use Kfg instead.
@@ -8,16 +7,6 @@ import { KfgDriver } from "./kfg-driver";
 export const ConfigJS = Kfg;
 
 /**
- * @deprecated Use KfgFS instead.
- */
-export const ConfigFS = KfgFS;
-
-/**
- * @deprecated Use KfgFileFS instead.
- */
-export const FileFSConfigJS = KfgFileFS;
-
-/**
  * @deprecated Use KfgDriver instead.
  */
-export const ConfigJSDriver = KfgDriver;
+// export const ConfigJSDriver = KfgDriver;

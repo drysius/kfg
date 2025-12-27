@@ -1,8 +1,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { KfgDriver } from "../kfg-driver";
+import { kfgDriver } from "../kfg-driver";
 import type { SchemaDefinition, TSchema } from "../types";
 import { parse, removeEnvKey, updateEnvContent } from "../utils/env";
+import { deepMerge } from "../utils/object";
+import { buildDefaultObject } from "../utils/schema";
 
 function getFilePath(config: { path?: string }): string {
 	return path.resolve(process.cwd(), config.path || ".env");
@@ -72,52 +74,57 @@ function traverseSchema(
 /**
  * A driver for loading configuration from environment variables and .env files.
  */
-export const envDriver = new KfgDriver({
-	identify: "env-driver",
-	async: false,
-	config: { path: ".env" },
-	onLoad(schema, _opts) {
-		const filePath = getFilePath(this.config);
-		const fileContent = fs.existsSync(filePath)
-			? fs.readFileSync(filePath, "utf-8")
-			: "";
-		const envFileValues = parse(fileContent);
+export const envDriver = kfgDriver<{ path: string }>((config) => {
+	return {
+		name: "env-driver",
+		async: false,
 
-		const processEnv = Object.fromEntries(
-			Object.entries(process.env).filter(([, v]) => v !== undefined),
-		) as Record<string, string>;
+		load(schema, opts) {
+			Object.assign(config, opts);
 
-		const allEnvValues = { ...processEnv, ...envFileValues };
+			const filePath = getFilePath(config);
+			const fileContent = fs.existsSync(filePath)
+				? fs.readFileSync(filePath, "utf-8")
+				: "";
+			const envFileValues = parse(fileContent);
 
-		const envData = traverseSchema(schema, allEnvValues);
-		const defaultData = this.buildDefaultObject(schema);
+			const processEnv = Object.fromEntries(
+				Object.entries(process.env).filter(([, v]) => v !== undefined),
+			) as Record<string, string>;
 
-		this.store = this.deepMerge(defaultData, envData);
-		return this.store;
-	},
-	onSet(key, value, options) {
-		const envKey = key.replace(/\./g, "_").toUpperCase();
+			const allEnvValues = { ...processEnv, ...envFileValues };
 
-		const filePath = getFilePath(this.config);
-		const currentContent = fs.existsSync(filePath)
-			? fs.readFileSync(filePath, "utf-8")
-			: "";
-		const newContent = updateEnvContent(
-			currentContent,
-			envKey,
-			value,
-			options?.description,
-		);
-		fs.writeFileSync(filePath, newContent);
-	},
-	onDel(key) {
-		const envKey = key.replace(/\./g, "_").toUpperCase();
-		const filePath = getFilePath(this.config);
-		if (!fs.existsSync(filePath)) {
-			return;
-		}
-		const currentContent = fs.readFileSync(filePath, "utf-8");
-		const newContent = removeEnvKey(currentContent, envKey);
-		fs.writeFileSync(filePath, newContent);
-	},
+			const envData = traverseSchema(schema, allEnvValues);
+			const defaultData = buildDefaultObject(schema);
+
+			return deepMerge(defaultData, envData);
+		},
+
+		set(key, value, options) {
+			const envKey = key.replace(/\./g, "_").toUpperCase();
+
+			const filePath = getFilePath(config);
+			const currentContent = fs.existsSync(filePath)
+				? fs.readFileSync(filePath, "utf-8")
+				: "";
+			const newContent = updateEnvContent(
+				currentContent,
+				envKey,
+				value,
+				options?.description,
+			);
+			fs.writeFileSync(filePath, newContent);
+		},
+
+		del(key) {
+			const envKey = key.replace(/\./g, "_").toUpperCase();
+			const filePath = getFilePath(config);
+			if (!fs.existsSync(filePath)) {
+				return;
+			}
+			const currentContent = fs.readFileSync(filePath, "utf-8");
+			const newContent = removeEnvKey(currentContent, envKey);
+			fs.writeFileSync(filePath, newContent);
+		},
+	};
 });
