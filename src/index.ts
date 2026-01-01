@@ -4,8 +4,5 @@ export * from "./drivers/sqlite-driver";
 export * from "./factory";
 export * from "./kfg";
 export * from "./kfg-driver";
-export * from "./kfg-ml";
-export * from "./migration";
-export * from "./model";
 export * from "./old";
 export * from "./types";

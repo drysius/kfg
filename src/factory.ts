@@ -10,7 +10,10 @@ import {
 	type TUnion,
 	Type,
 } from "@sinclair/typebox";
-import type { CustomOptions } from "./types";
+import { Value } from "@sinclair/typebox/value";
+import { rule } from "./rule";
+import type { CustomOptions, SchemaDefinition } from "./types";
+import { addSmartDefaults, buildTypeBoxSchema } from "./utils/schema";
 
 // Helper function to extract values from string arrays, const arrays, or enums
 function getEnumValues<T extends readonly (string | number)[] | object>(
@@ -151,6 +154,36 @@ const _c = {
 			default: Date.now(),
 		});
 	},
+
+	/**
+	 * Creates a schema based on a Laravel-like rule string.
+	 * @param rules The rule string (e.g., 'required|string|min:3').
+	 * @param defaultValue The default value.
+	 */
+	rule: rule,
+
+	/**
+	 * Validates data against a schema definition.
+	 * @param schema The schema definition.
+	 * @param data The data to validate.
+	 * @returns The validated and coerced data.
+	 */
+	validate: (schema: SchemaDefinition, data: any): any => {
+		const compiledSchema = buildTypeBoxSchema(schema);
+		addSmartDefaults(compiledSchema);
+		const configWithDefaults = Value.Default(compiledSchema, data) as any;
+		Value.Convert(compiledSchema, configWithDefaults);
+
+		if (!Value.Check(compiledSchema, configWithDefaults)) {
+			const errors = [...Value.Errors(compiledSchema, configWithDefaults)];
+			throw new Error(
+				`Validation failed:\n${errors
+					.map((e) => `- ${e.path}: ${e.message}`)
+					.join("\n")}`,
+			);
+		}
+		return configWithDefaults;
+	},
 };
 
 /**
@@ -175,6 +208,8 @@ export const c = {
 	random: _c.Random,
 	model: _c.Model,
 	createms: _c.createms,
+	rule: _c.rule,
+	validate: _c.validate,
 };
 export const k = c;
 export const m = c;

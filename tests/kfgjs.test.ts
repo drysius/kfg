@@ -1,7 +1,8 @@
 import { describe, it, expect, afterEach, beforeEach } from "bun:test";
 import { Kfg } from "../src/kfg";
 import { c } from "../src/factory";
-import { envDriver } from "../src/drivers/env-driver";
+import { EnvDriver } from "../src/drivers/env-driver";
+import { KfgDriver } from "../src/kfg-driver";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -16,6 +17,7 @@ describe("Kfg Core Functionality with EnvDriver", () => {
 		delete process.env.DC_TOKEN;
 		delete process.env.DISCORD_TOKEN;
 		delete process.env.APP_PORT;
+		delete process.env.APP_NAME;
 	});
 
 	afterEach(() => {
@@ -34,7 +36,7 @@ describe("Kfg Core Functionality with EnvDriver", () => {
 			},
 		};
 
-		const config = new Kfg(envDriver, schema);
+		const config = new Kfg(new KfgDriver(EnvDriver.definition), schema);
 		config.load({ path: TEST_ENV_PATH });
 
 		const token = config.get("dc.token");
@@ -51,7 +53,7 @@ describe("Kfg Core Functionality with EnvDriver", () => {
 			},
 		};
 
-		const config = new Kfg(envDriver, schema);
+		const config = new Kfg(new KfgDriver(EnvDriver.definition), schema);
 		config.load({ path: TEST_ENV_PATH });
 
 		expect(config.get("dc.token")).toBe("custom_prop_token");
@@ -66,7 +68,7 @@ describe("Kfg Core Functionality with EnvDriver", () => {
 			},
 		};
 
-		const config = new Kfg(envDriver, schema);
+		const config = new Kfg(new KfgDriver(EnvDriver.definition), schema);
 		config.load({ path: TEST_ENV_PATH });
 
 		expect(config.get("dc.token")).toBe("default_token");
@@ -86,13 +88,13 @@ describe("Kfg Core Functionality with EnvDriver", () => {
 			},
 		};
 
-		const config = new Kfg(envDriver, schema);
+		const config = new Kfg(new KfgDriver(EnvDriver.definition), schema);
 		config.load({ path: TEST_ENV_PATH });
 
-		const app = config.root("app");
+		const app = config.get("app");
 		expect(app).toEqual({ port: 8080, name: "MyApp" });
 
-		const db = config.root("db");
+		const db = config.get("db");
 		expect(db).toEqual({ host: "localhost" });
 	});
 
@@ -107,7 +109,7 @@ describe("Kfg Core Functionality with EnvDriver", () => {
 			},
 		};
 
-		const config = new Kfg(envDriver, schema);
+		const config = new Kfg(new KfgDriver(EnvDriver.definition), schema);
 		config.load({ path: TEST_ENV_PATH });
 
 		expect(config.get("dc.token")).toBe("file_token");
@@ -121,7 +123,7 @@ describe("Kfg Core Functionality with EnvDriver", () => {
 				port: c.number({ default: 8080 }),
 			},
 		};
-		const config = new Kfg(envDriver, schema);
+		const config = new Kfg(new KfgDriver(EnvDriver.definition), schema);
 		config.load({ path: TEST_ENV_PATH });
 
 		config.set("app.port", 9999);
@@ -143,7 +145,7 @@ describe("Kfg Core Functionality with EnvDriver", () => {
 			},
 		};
 
-		const config = new Kfg(envDriver, schema);
+		const config = new Kfg(new KfgDriver(EnvDriver.definition), schema);
 		config.load({ path: TEST_ENV_PATH });
 
 		expect(config.has("app.port")).toBe(true);
@@ -157,8 +159,8 @@ describe("Kfg Core Functionality with EnvDriver", () => {
 	// Ensures that attempting to access configuration values before
 	// the configuration has been loaded results in a thrown error.
     it('should throw an error if get() is called before load()', () => {
-        const config = new Kfg(envDriver, {});
-        expect(() => config.get('any.path' as never)).toThrow('[Kfg] Config not loaded. Call load() first.');
+        const config = new Kfg(new KfgDriver(EnvDriver.definition), {});
+        expect(() => config.get('any.path' as never)).toThrow('[Kfg] Config not loaded. Call mount() first.');
     });
 
 	// Validates the `only_importants` feature, ensuring that validation is
@@ -175,21 +177,21 @@ describe("Kfg Core Functionality with EnvDriver", () => {
 			}
 		};
 
-		const configFail = new Kfg(envDriver, schema);
+		const configFail = new Kfg(new KfgDriver(EnvDriver.definition), schema);
 		expect(() => configFail.load({ path: TEST_ENV_PATH })).toThrow();
 
 		fs.writeFileSync(TEST_ENV_PATH, 'APP_VERSION=1.0.0');
 
-		const configFail2 = new Kfg(envDriver, schema);
+		const configFail2 = new Kfg(new KfgDriver(EnvDriver.definition), schema);
 		expect(() => configFail2.load({ path: TEST_ENV_PATH })).toThrow();
 
-		const configSuccess = new Kfg(envDriver, schema);
+		const configSuccess = new Kfg(new KfgDriver(EnvDriver.definition), schema);
 		configSuccess.load({ path: TEST_ENV_PATH, only_importants: true });
 		expect(configSuccess.get('app.version')).toBe('1.0.0');
 		expect(configSuccess.has('app.name')).toBe(false);
 
 		if (fs.existsSync(TEST_ENV_PATH)) fs.unlinkSync(TEST_ENV_PATH);
-		const configFailImportant = new Kfg(envDriver, schema);
+		const configFailImportant = new Kfg(new KfgDriver(EnvDriver.definition), schema);
 		expect(() => configFailImportant.load({ path: TEST_ENV_PATH, only_importants: true })).toThrow();
 	});
 });

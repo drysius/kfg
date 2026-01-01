@@ -6,31 +6,42 @@ type BunSqlite = typeof import("bun:sqlite").Database;
 type NodeSqlite = typeof import("node:sqlite").DatabaseSync;
 type BetterSqlite = typeof import("better-sqlite3");
 
-export async function loadSqliteDatabase() {
+function loadSqliteDatabase() {
 	const firsttry = typeof Bun !== "undefined" ? "bun:sqlite" : "node:sqlite";
 	let sqlite: BunSqlite | NodeSqlite | BetterSqlite;
 	let moduleType: string;
 
-	try {
-		if (firsttry === "bun:sqlite") {
-			const m = await import("bun:sqlite");
+	if (firsttry === "bun:sqlite") {
+		try {
+			const m = require("bun:sqlite");
 			sqlite = m.Database;
 			moduleType = "bun:sqlite";
-		} else {
-			const m = await import("node:sqlite");
+		} catch {
+			try {
+				const m = require("better-sqlite3");
+				sqlite = m?.default || m;
+				moduleType = "better-sqlite3";
+			} catch {
+				throw new Error(
+					"Bun and better-sqlite3 database not found, update your environment",
+				);
+			}
+		}
+	} else {
+		try {
+			const m = require("node:sqlite");
 			sqlite = m.DatabaseSync;
 			moduleType = "node:sqlite";
-		}
-	} catch {
-		try {
-			// not supported use module better-sqlite3
-			const m = await import("better-sqlite3");
-			sqlite = m?.default || m;
-			moduleType = "better-sqlite3";
 		} catch {
-			throw new Error(
-				"Bun, node and better-sqlite3 database not found, update your environment",
-			);
+			try {
+				const m = require("better-sqlite3");
+				sqlite = m?.default || m;
+				moduleType = "better-sqlite3";
+			} catch {
+				throw new Error(
+					"Node and better-sqlite3 database not found, update your environment",
+				);
+			}
 		}
 	}
 
@@ -73,8 +84,26 @@ export async function loadSqliteDatabase() {
 			};
 		}
 
+		transaction(fn: () => void) {
+			const db = this.db as any;
+			if (typeof db.transaction === "function") {
+				return db.transaction(fn);
+			}
+			return () => {
+				this.exec("BEGIN");
+				try {
+					fn();
+					this.exec("COMMIT");
+				} catch (e) {
+					this.exec("ROLLBACK");
+					throw e;
+				}
+			};
+		}
 		close() {
 			this.db.close();
 		}
 	};
 }
+const KfgDatabase = loadSqliteDatabase();
+export default KfgDatabase;

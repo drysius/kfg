@@ -1,43 +1,93 @@
 
 --- START OF FILE: src/kfg.ts ---
-import type { Driver, DriverFactory } from "./types";
+import { Value } from "@sinclair/typebox/value";
+import { KfgStore } from "./store";
+import type { KfgDriver } from "./kfg-driver";
 import type {
 	DeepGet,
-	inPromise,
 	Paths,
 	RootPaths,
 	SchemaDefinition,
 	StaticSchema,
+	inPromise,
 } from "./types";
-import { getProperty, setProperty, deepMerge, deleteProperty } from "./utils/object";
-import { makeSchemaOptional } from "./utils/schema";
+import {
+	addSmartDefaults,
+	buildTypeBoxSchema,
+	makeSchemaOptional,
+} from "./utils/schema";
+import { getProperty, setProperty } from "./utils/object";
 
 /**
  * The main class for Kfg. It is responsible for loading and managing the configuration.
  * @template D The type of the driver.
  * @template S The type of the schema.
  */
-export class Kfg<
-	D extends Driver<any>,
-	S extends SchemaDefinition,
-> {
+export class Kfg<D extends KfgDriver<any, any>, S extends SchemaDefinition> {
 	public driver: D;
 	public schema: S;
+	public $store = new KfgStore();
 	private loaded = false;
 	private _lastOptions: any;
 
 	/**
 	 * Creates a new instance of Kfg.
-	 * @param driverOrFactory The driver instance or factory function.
+	 * @param driver The driver instance.
 	 * @param schema The schema to use for validating the configuration.
 	 */
-	constructor(driverOrFactory: D | DriverFactory<any, any>, schema: S) {
-        if (typeof driverOrFactory === 'function') {
-            this.driver = driverOrFactory({}) as D;
-        } else {
-            this.driver = driverOrFactory;
-        }
+	constructor(driver: D, schema: S) {
+		this.driver = driver;
 		this.schema = schema;
+	}
+
+	/**
+	 * Returns the driver configuration from the store.
+	 */
+	get $config(): D["config"] {
+		return this.$store.get("~driver", this.driver.config);
+	}
+
+	/**
+	 * Mounts the configuration using the driver.
+	 * @param options - The loading options.
+	 */
+	public mount(
+		options?: D["config"] & {
+			only_importants?: boolean;
+		},
+	): inPromise<D["async"], void> {
+		this._lastOptions = options;
+		let schemaToLoad = this.schema;
+		if (options?.only_importants) {
+			schemaToLoad = makeSchemaOptional(this.schema) as S;
+		}
+
+		const processResult = (result: any) => {
+			const validated = this.validate(result, schemaToLoad);
+			this.$store.set("data", validated);
+			this.loaded = true;
+		};
+
+		const result = this.driver.mount(this, options);
+		if (this.driver.async) {
+			return (result as Promise<void>).then(processResult) as inPromise<
+				D["async"],
+				void
+			>;
+		}
+		processResult(result);
+		return undefined as inPromise<D["async"], void>;
+	}
+
+	/**
+	 * Alias for mount().
+	 */
+	public load(
+		options?: Partial<D["config"]> & {
+			only_importants?: boolean;
+		},
+	) {
+		return this.mount(options);
 	}
 
 	/**
@@ -45,38 +95,32 @@ export class Kfg<
 	 * @param options - The loading options.
 	 */
 	public reload(
-		options?: any & {
+		options?: Partial<D["config"]> & {
 			only_importants?: boolean;
 		},
 	) {
 		this.loaded = false;
-		return this.load(options || this._lastOptions);
+		return this.mount(options || this._lastOptions);
 	}
 
 	/**
-	 * Loads the configuration.
-	 * @param options - The loading options.
+	 * Saves the configuration.
+	 * @param data Optional data to save.
 	 */
-	public load(
-		options?: any & {
-			only_importants?: boolean;
-		},
-	) {
-		this._lastOptions = options;
-		let schemaToLoad = this.schema;
-		if (options?.only_importants) {
-			schemaToLoad = makeSchemaOptional(this.schema) as S;
+	public save(data?: any): inPromise<D["async"], void> {
+		if (!this.loaded) {
+			throw new Error("[Kfg] Config not loaded. Call mount() first.");
 		}
-		const result = this.driver.load(schemaToLoad, options);
-		if (this.driver.async) {
-			return (result as Promise<any>).then((data) => {
-                this.driver.inject(data);
-				this.loaded = true;
-			}) as inPromise<D["async"], void>;
-		}
-        this.driver.inject(result);
-		this.loaded = true;
-		return undefined as inPromise<D["async"], void>;
+
+		const run = () => {
+			const currentData = this.$store.get("data");
+			if (this.driver.save) {
+				return this.driver.save(this as never, data || currentData);
+			}
+		};
+
+		if (this.driver.async) return Promise.resolve().then(run) as any;
+		return run() as any;
 	}
 
 	/**
@@ -84,14 +128,23 @@ export class Kfg<
 	 * @param path The path to the value.
 	 * @returns The value at the given path.
 	 */
-	public get<P extends Paths<StaticSchema<S>>>(path: P) {
+	public get<P extends Paths<StaticSchema<S>>>( 
+		path: P,
+	): inPromise<D["async"], DeepGet<StaticSchema<S>, P>> {
 		if (!this.loaded) {
-			throw new Error("[Kfg] Config not loaded. Call load() first.");
+			throw new Error("[Kfg] Config not loaded. Call mount() first.");
 		}
-		return this.driver.get(path as string) as inPromise<
-			D["async"],
-			DeepGet<StaticSchema<S>, P>
-		>;
+
+		const run = () => {
+			const data = this.$store.get("data", {});
+			return getProperty(data, path as string);
+		};
+
+		if (this.driver.async) {
+			return (this.driver.onRequest!(this as never, { path }) as Promise<void>).then(run) as inPromise<D["async"], DeepGet<StaticSchema<S>, P>>;
+		}
+		if (this.driver.onRequest) this.driver.onRequest(this as never, { path });
+		return run() as inPromise<D["async"], DeepGet<StaticSchema<S>, P>>;
 	}
 
 	/**
@@ -99,184 +152,196 @@ export class Kfg<
 	 * @param paths The paths to the values.
 	 * @returns True if all values exist, false otherwise.
 	 */
-	public has<P extends Paths<StaticSchema<S>>>(...paths: P[]) {
+	public has<P extends Paths<StaticSchema<S>>>(
+		...paths: P[]
+	): inPromise<D["async"], boolean> {
 		if (!this.loaded) {
-			throw new Error("[Kfg] Config not loaded. Call load() first.");
+			throw new Error("[Kfg] Config not loaded. Call mount() first.");
 		}
-		return this.driver.has(...paths) as inPromise<D["async"], boolean>;
-	}
 
-	/**
-	 * Gets a value from the configuration.
-	 * @param path The path to the value.
-	 * @returns The value at the given path.
-	 */
-	public root<P extends RootPaths<StaticSchema<S>>>(path: P) {
-		if (!this.loaded) {
-			throw new Error("[Kfg] Config not loaded. Call load() first.");
+		const run = () => {
+			const data = this.$store.get("data", {});
+			return paths.every((path) => getProperty(data, path as string) !== undefined);
+		};
+
+		if (this.driver.async) {
+			return (this.driver.onRequest!(this as never, { paths }) as Promise<void>).then(run) as inPromise<D["async"], boolean>;
 		}
-		return this.driver.get(path as string) as inPromise<
-			D["async"],
-			DeepGet<StaticSchema<S>, P>
-		>;
+		if (this.driver.onRequest) this.driver.onRequest(this as never, { paths });
+		return run() as inPromise<D["async"], boolean>;
 	}
 
 	/**
 	 * Sets a value in the configuration.
-	 * @param path The path to the value.
-	 * @param value The new value.
-	 * @param options The options for setting the value.
 	 */
 	public set<P extends Paths<StaticSchema<S>>>(
 		path: P,
 		value: DeepGet<StaticSchema<S>, P>,
 		options?: { description?: string },
-	) {
+	): inPromise<D["async"], void> {
 		if (!this.loaded) {
-			throw new Error("[Kfg] Config not loaded. Call load() first.");
+			throw new Error("[Kfg] Config not loaded. Call mount() first.");
 		}
-        
-        const run = async () => {
-            const data = await this.driver.get();
-            return this.driver.set(path as string, value, { ...options, data });
-        };
 
-        if (this.driver.async) return run() as inPromise<D["async"], void>;
-        const data = this.driver.get();
-		return this.driver.set(path as string, value, { ...options, data }) as inPromise<D["async"], void>;
+		const run = () => {
+			const data = this.$store.get("data", {});
+			setProperty(data, path as string, value);
+			this.$store.set("data", data);
+
+			if (this.driver.onUpdate) {
+				return this.driver.onUpdate(this as never, { path, value, ...options });
+			}
+		};
+
+		if (this.driver.async) {
+			return (this.driver.onRequest!(this as never, { path, value, ...options }) as Promise<void>).then(
+				run,
+			) as inPromise<D["async"], void>;
+		}
+		if (this.driver.onRequest) 
+			this.driver.onRequest(this as never, { path, value, ...options });
+		return run() as inPromise<D["async"], void>;
 	}
 
 	/**
 	 * Inserts a partial value into an object in the configuration.
-	 * @param path The path to the object.
-	 * @param partial The partial value to insert.
 	 */
 	public insert<P extends RootPaths<StaticSchema<S>>>(
 		path: P,
 		partial: Partial<DeepGet<StaticSchema<S>, P>>,
-	) {
+	): inPromise<D["async"], void> {
 		if (!this.loaded) {
-			throw new Error("[Kfg] Config not loaded. Call load() first.");
+			throw new Error("[Kfg] Config not loaded. Call mount() first.");
 		}
-        
-        const run = async () => {
-            const data = await this.driver.get();
-            const target = getProperty(data, path as string);
-            if (typeof target !== "object" || target === null) {
-                throw new Error(`Cannot insert into non-object at path: ${path}`);
-            }
-            Object.assign(target, partial);
-            return this.driver.set(path as string, target, { data });
-        };
 
-        if (this.driver.async) return run() as inPromise<D["async"], void>;
-        const data = this.driver.get();
-        const target = getProperty(data, path as string);
-		if (typeof target !== "object" || target === null) {
-			throw new Error(`Cannot insert into non-object at path: ${path}`);
+		const run = () => {
+			const data = this.$store.get("data", {});
+			const target = getProperty(data, path as string);
+			if (typeof target !== "object" || target === null) {
+				throw new Error(`Cannot insert into non-object at path: ${path}`);
+			}
+			Object.assign(target, partial);
+			this.$store.set("data", data);
+
+			if (this.driver.onUpdate) {
+				return this.driver.onUpdate(this as never, { path, value: target });
+			}
+		};
+
+		if (this.driver.async) {
+			return (this.driver.onRequest!(this as never, { path, partial }) as Promise<void>).then(run) as inPromise<D["async"], void>;
 		}
-		Object.assign(target, partial);
-		return this.driver.set(path as string, target, { data }) as inPromise<D["async"], void>;
+		if (this.driver.onRequest) this.driver.onRequest(this as never, { path, partial });
+		return run() as inPromise<D["async"], void> ;
 	}
 
 	/**
 	 * Injects a partial value directly into the root configuration object.
-	 * @param data The partial data to inject.
 	 */
-	public inject(data: Partial<StaticSchema<S>>) {
-		return this.driver.inject(data) as inPromise<D["async"], void>;
+	public inject(data: Partial<StaticSchema<S>>): inPromise<D["async"], void> {
+		const run = () => {
+			this.$store.merge("data", data);
+			if (this.driver.onMerge) {
+				return this.driver.onMerge(this as never, { data });
+			}
+		};
+
+		if (this.driver.async) {
+			return (this.driver.onRequest!(this as never, { data }) as Promise<void>).then(run) as inPromise<D["async"], void>;
+		}
+
+		if (this.driver.onRequest) this.driver.onRequest(this as never, { data });
+		return run() as inPromise<D["async"], void>;
 	}
 
 	/**
 	 * Deletes a value from the configuration.
-	 * @param path The path to the value.
 	 */
-	public del<P extends Paths<StaticSchema<S>>>(path: P) {
+	public del<P extends Paths<StaticSchema<S>>>( 
+		path: P,
+	): inPromise<D["async"], void> {
 		if (!this.loaded) {
-			throw new Error("[Kfg] Config not loaded. Call load() first.");
+			throw new Error("[Kfg] Config not loaded. Call mount() first.");
 		}
-        
-        const run = async () => {
-            const data = await this.driver.get();
-            return this.driver.del(path as string, { data });
-        };
 
-        if (this.driver.async) return run() as inPromise<D["async"], void>;
-        const data = this.driver.get();
-		return this.driver.del(path as string, { data }) as inPromise<D["async"], void>;
+		const run = () => {
+			const data = this.$store.get("data", {});
+			const keys = (path as string).split(".");
+			const lastKey = keys.pop()!;
+			let target = data;
+			for (const key of keys) {
+				target = target[key];
+				if (!target) return;
+			}
+			delete target[lastKey];
+			this.$store.set("data", data);
+
+			if (this.driver.onDelete) {
+				return this.driver.onDelete(this as never, { path });
+			}
+		};
+
+		if (this.driver.async) {
+			return (this.driver.onRequest!(this as never, { path }) as Promise<void>).then(run) as any;
+		}
+		if (this.driver.onRequest) this.driver.onRequest(this as never, { path });
+		return run() as any;
 	}
 
 	/**
-	 * Gets the schema for a given path.
-	 * @param path The path to the schema.
-	 * @returns The schema at the given path.
+	 * Validates data against the schema.
 	 */
-	public conf<P extends Paths<StaticSchema<S>>>(path: P) {
+	private validate(data: any, schema = this.schema): any {
+		const compiledSchema = buildTypeBoxSchema(schema);
+		addSmartDefaults(compiledSchema);
+		const configWithDefaults = Value.Default(compiledSchema, data) as any;
+		Value.Convert(compiledSchema, configWithDefaults);
+
+		if (!Value.Check(compiledSchema, configWithDefaults)) {
+			const errors = [...Value.Errors(compiledSchema, configWithDefaults)];
+			throw new Error(
+				`[Kfg] Validation failed:\n${errors
+					.map((e) => `- ${e.path}: ${e.message}`) 
+					.join("\n")}`,
+			);
+		}
+		return configWithDefaults;
+	}
+
+	/**
+	 * Unmounts the driver.
+	 */
+	public unmount() {
+		this.driver.unmount?.(this);
+	}
+
+	/**
+	 * Returns cached data.
+	 */
+	public toJSON(): StaticSchema<S> {
 		if (!this.loaded) {
-			throw new Error("[Kfg] Config not loaded. Call load() first.");
+			throw new Error("[Kfg] Config not loaded. Call mount() first.");
 		}
-		return getProperty(this.schema, path as string) as DeepGet<S, P>;
+		return this.$store.get("data");
 	}
-
-	/**
-	 * Returns the schema definition for a given path.
-	 * @param path The path to the schema.
-	 * @returns The schema at the given path.
-	 */
-	public schematic<P extends Paths<StaticSchema<S>>>(path: P) {
-		return this.conf(path);
-	}
-
-	/**
-	 * Hydrates the configuration with data and marks it as loaded.
-	 * @param data The data to hydrate with.
-	 */
-	public hydrate(data: Partial<StaticSchema<S>>) {
-		this.inject(data);
-		this.loaded = true;
-	}
-
-	/**
-	 * Returns cached data
-	 * @returns
-	 */
-	public toJSON() {
-		if (!this.loaded) {
-			throw new Error("[Kfg] Config not loaded. Call load() first.");
-		}
-		return this.driver.get() as inPromise<D["async"], StaticSchema<S>>;
-	}
-
-    /**
-     * Unmounts the driver and cleans up resources.
-     */
-    public unmount() {
-        if (this.driver.unmount) {
-            this.driver.unmount();
-        }
-    }
 }
-
 --- END OF FILE: src/kfg.ts ---
 
 --- START OF FILE: src/index.ts ---
-export * from "./kfg";
-export * from "./kfg-driver";
-export * from "./kfg-ml";
-export * from "./model";
-export * from "./migration";
-export * from "./old";
 export * from "./drivers/env-driver";
 export * from "./drivers/json-driver";
 export * from "./drivers/sqlite-driver";
 export * from "./factory";
+export * from "./kfg";
+export * from "./kfg-driver";
+export * from "./old";
 export * from "./types";
 
 --- END OF FILE: src/index.ts ---
 
 --- START OF FILE: src/old.ts ---
 import { Kfg } from "./kfg";
-// import { KfgDriver } from "./kfg-driver";
+import { KfgDriver } from "./kfg-driver";
 
 /**
  * @deprecated Use Kfg instead.
@@ -286,14 +351,20 @@ export const ConfigJS = Kfg;
 /**
  * @deprecated Use KfgDriver instead.
  */
-// export const ConfigJSDriver = KfgDriver;
+export const ConfigJSDriver = KfgDriver;
+
 --- END OF FILE: src/old.ts ---
 
 --- START OF FILE: src/drivers/json-driver.ts ---
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { flattenObject, getProperty, unflattenObject, deepMerge } from "../utils/object";
-import { kfgDriver } from "../kfg-driver";
+import { KfgDriver } from "../kfg-driver";
+import {
+	deepMerge,
+	flattenObject,
+	getProperty,
+	unflattenObject,
+} from "../utils/object";
 import { buildDefaultObject } from "../utils/schema";
 
 // Recursively strips comment properties (e.g., "port:comment") from a nested data
@@ -330,106 +401,115 @@ function getFilePath(config: { path?: string }): string {
 	return path.resolve(process.cwd(), config.path || "config.json");
 }
 
+function save(kfg: any, config: any) {
+	const data = kfg.$store.get("data");
+	const comments = kfg.$store.get("comments", {});
+
+	let dataToSave: Record<string, any>;
+	if (config.keyroot) {
+		dataToSave = flattenObject(data);
+		for (const path in comments) {
+			dataToSave[`${path}:comment`] = comments[path];
+		}
+	} else {
+		const dataWithComments = JSON.parse(JSON.stringify(data));
+		for (const path in comments) {
+			const keys = path.split(".");
+			const propName = keys.pop() as string;
+			const parentPath = keys.join(".");
+			const parentObject = parentPath
+				? getProperty(dataWithComments, parentPath)
+				: dataWithComments;
+			if (typeof parentObject === "object" && parentObject !== null) {
+				parentObject[`${propName}:comment`] = comments[path];
+			}
+		}
+		dataToSave = dataWithComments;
+	}
+
+	const filePath = getFilePath(config);
+	fs.writeFileSync(filePath, JSON.stringify(dataToSave, null, 2));
+}
+
 /**
  * A driver for loading configuration from JSON files.
  */
-export const jsonDriver = kfgDriver<{ path: string; keyroot: boolean }>((config) => {
-	let comments: Record<string, string> = {};
+export const JsonDriver = new KfgDriver<
+	{ path?: string; keyroot?: boolean },
+	false
+>({
+	identify: "json-driver",
+	async: false,
+	config: {},
+	onMount(kfg, opts) {
+		const cfg = { ...this.config, ...opts };
+		const defaultData = buildDefaultObject(kfg.schema);
+		const filePath = getFilePath(cfg);
 
-	function save(data: any) {
-		let dataToSave: Record<string, any>;
-		if (config.keyroot) {
-			dataToSave = flattenObject(data);
-			for (const path in comments) {
-				dataToSave[`${path}:comment`] = comments[path];
-			}
-		} else {
-			const dataWithComments = JSON.parse(JSON.stringify(data));
-			for (const path in comments) {
-				const keys = path.split(".");
-				const propName = keys.pop() as string;
-				const parentPath = keys.join(".");
-				const parentObject = parentPath
-					? getProperty(dataWithComments, parentPath)
-					: dataWithComments;
-				if (typeof parentObject === "object" && parentObject !== null) {
-					parentObject[`${propName}:comment`] = comments[path];
+		let loadedData: Record<string, any> = {};
+		if (fs.existsSync(filePath)) {
+			try {
+				const fileContent = fs.readFileSync(filePath, "utf-8");
+				if (fileContent) {
+					loadedData = JSON.parse(fileContent);
 				}
+			} catch (_e) {
+				/* Ignore */
 			}
-			dataToSave = dataWithComments;
 		}
 
-		const filePath = getFilePath(config);
-		fs.writeFileSync(filePath, JSON.stringify(dataToSave, null, 2));
-	}
-
-	return {
-		name: "json-driver",
-		async: false,
-
-		load(schema, opts) {
-			Object.assign(config, opts);
-
-			const defaultData = buildDefaultObject(schema);
-			const filePath = getFilePath(config);
-
-			let loadedData: Record<string, any> = {};
-			if (fs.existsSync(filePath)) {
-				try {
-					const fileContent = fs.readFileSync(filePath, "utf-8");
-					if (fileContent) {
-						loadedData = JSON.parse(fileContent);
-					}
-				} catch (_e) {
-					/* Ignore */
+		let comments: Record<string, string> = {};
+		if (cfg.keyroot) {
+			const flatData = loadedData as Record<string, any>;
+			const cmts: Record<string, string> = {};
+			const data: Record<string, any> = {};
+			for (const key in flatData) {
+				if (key.endsWith(":comment")) {
+					cmts[key.replace(/:comment$/, "")] = flatData[key];
+				} else {
+					data[key] = flatData[key];
 				}
 			}
+			comments = cmts;
+			loadedData = unflattenObject(data);
+		} else {
+			comments = stripComments(loadedData);
+		}
 
-			if (config.keyroot) {
-				const flatData = loadedData as Record<string, any>;
-				const cmts: Record<string, string> = {};
-				const data: Record<string, any> = {};
-				for (const key in flatData) {
-					if (key.endsWith(":comment")) {
-						cmts[key.replace(/:comment$/, "")] = flatData[key];
-					} else {
-						data[key] = flatData[key];
-					}
-				}
-				comments = cmts;
-				loadedData = unflattenObject(data);
-			} else {
-				comments = stripComments(loadedData);
+		kfg.$store.set("comments", comments);
+		return deepMerge(defaultData, loadedData);
+	},
+
+	onUpdate(kfg, opts) {
+		if (opts?.path && opts?.description) {
+			const comments = kfg.$store.get("comments", {});
+			comments[opts.path] = opts.description;
+			kfg.$store.set("comments", comments);
+		}
+		save(kfg, this.config);
+	},
+
+	onDelete(kfg, opts) {
+		if (opts?.path) {
+			const comments = kfg.$store.get("comments", {});
+			if (comments[opts.path]) {
+				delete comments[opts.path];
+				kfg.$store.set("comments", comments);
 			}
+		}
+		save(kfg, this.config);
+	},
 
-			return deepMerge(defaultData, loadedData);
-		},
-
-		set(key, value, options) {
-			if (!options) options = {};
-			if (key) {
-				if (options?.description) {
-					comments[key] = options.description;
-				}
-			}
-			save(options.data);
-		},
-
-		del(key, options) {
-			if (!options) options = {};
-			if (comments?.[key]) {
-				delete comments[key];
-			}
-			save(options.data);
-		},
-	};
+	save(kfg) {
+		save(kfg, this.config);
+	},
 });
 --- END OF FILE: src/drivers/json-driver.ts ---
 
 --- START OF FILE: src/drivers/env-driver.ts ---
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { kfgDriver } from "../kfg-driver";
+import { KfgDriver } from "../kfg-driver";
 import type { SchemaDefinition, TSchema } from "../types";
 import { parse, removeEnvKey, updateEnvContent } from "../utils/env";
 import { deepMerge } from "../utils/object";
@@ -503,65 +583,64 @@ function traverseSchema(
 /**
  * A driver for loading configuration from environment variables and .env files.
  */
-export const envDriver = kfgDriver<{ path: string }>((config) => {
-    return {
-        name: "env-driver",
-        async: false,
-        
-        load(schema, opts) {
-            Object.assign(config, opts);
-            
-            const filePath = getFilePath(config);
-            const fileContent = fs.existsSync(filePath)
-                ? fs.readFileSync(filePath, "utf-8")
-                : "";
-            const envFileValues = parse(fileContent);
+export const EnvDriver = new KfgDriver<{ path?: string }, false>({
+	identify: "env-driver",
+	async: false,
+	config: {},
+	onMount(kfg, opts) {
+		const cfg = { ...this.config, ...opts };
+		const filePath = getFilePath(cfg);
+		const fileContent = fs.existsSync(filePath)
+			? fs.readFileSync(filePath, "utf-8")
+			: "";
+		const envFileValues = parse(fileContent);
 
-            const processEnv = Object.fromEntries(
-                Object.entries(process.env).filter(([, v]) => v !== undefined),
-            ) as Record<string, string>;
+		const processEnv = Object.fromEntries(
+			Object.entries(process.env).filter(([, v]) => v !== undefined),
+		) as Record<string, string>;
 
-            const allEnvValues = { ...processEnv, ...envFileValues };
+		const allEnvValues = { ...processEnv, ...envFileValues };
 
-            const envData = traverseSchema(schema, allEnvValues);
-            const defaultData = buildDefaultObject(schema);
+		const envData = traverseSchema(kfg.schema, allEnvValues);
+		const defaultData = buildDefaultObject(kfg.schema);
 
-            return deepMerge(defaultData, envData);
-        },
+		return deepMerge(defaultData, envData);
+	},
 
-        set(key, value, options) {
-            const envKey = key.replace(/\./g, "_").toUpperCase();
+	onUpdate(_kfg, opts) {
+		if (!opts?.path) return;
+		const envKey = opts.path.replace(/\./g, "_").toUpperCase();
 
-            const filePath = getFilePath(config);
-            const currentContent = fs.existsSync(filePath)
-                ? fs.readFileSync(filePath, "utf-8")
-                : "";
-            const newContent = updateEnvContent(
-                currentContent,
-                envKey,
-                value,
-                options?.description,
-            );
-            fs.writeFileSync(filePath, newContent);
-        },
+		const filePath = getFilePath(this.config!);
+		const currentContent = fs.existsSync(filePath)
+			? fs.readFileSync(filePath, "utf-8")
+			: "";
+		const newContent = updateEnvContent(
+			currentContent,
+			envKey,
+			opts.value,
+			opts.description,
+		);
+		fs.writeFileSync(filePath, newContent);
+	},
 
-        del(key) {
-            const envKey = key.replace(/\./g, "_").toUpperCase();
-            const filePath = getFilePath(config);
-            if (!fs.existsSync(filePath)) {
-                return;
-            }
-            const currentContent = fs.readFileSync(filePath, "utf-8");
-            const newContent = removeEnvKey(currentContent, envKey);
-            fs.writeFileSync(filePath, newContent);
-        },
-    };
+	onDelete(_kfg, opts) {
+		if (!opts?.path) return;
+		const envKey = opts.path.replace(/\./g, "_").toUpperCase();
+		const filePath = getFilePath(this.config!);
+		if (!fs.existsSync(filePath)) {
+			return;
+		}
+		const currentContent = fs.readFileSync(filePath, "utf-8");
+		const newContent = removeEnvKey(currentContent, envKey);
+		fs.writeFileSync(filePath, newContent);
+	},
 });
 --- END OF FILE: src/drivers/env-driver.ts ---
 
 --- START OF FILE: src/drivers/sqlite-driver.ts ---
-import { kfgDriver } from "../kfg-driver";
-import { flattenObject, unflattenObject } from "../utils/object";
+import { KfgDriver } from "../kfg-driver";
+import { unflattenObject } from "../utils/object";
 import { loadSqliteDatabase } from "../utils/sqlite";
 
 const KfgDatabase = await loadSqliteDatabase();
@@ -570,8 +649,6 @@ export interface SqliteDriverConfig {
 	path?: string;
 	table?: string;
 	database?: string | any;
-	parents?: any[];
-	parent?: boolean;
 }
 
 function getDb(config: SqliteDriverConfig): any {
@@ -609,248 +686,91 @@ function rowToValue(row: any) {
 	return val;
 }
 
-export const sqliteDriver = kfgDriver<SqliteDriverConfig>((config) => {
-    return {
-        name: "sqlite-driver",
-        async: false,
-        model: true,
-        _db: null as any,
+export const SqliteDriver = new KfgDriver<SqliteDriverConfig, false>({
+	identify: "sqlite-driver",
+	async: false,
+	config: {},
+	onMount(kfg, opts) {
+		const cfg = { ...this.config, ...opts };
+		const db = getDb(cfg);
+		kfg.$store.set("db", db);
+		kfg.$store.set("queue", []);
 
-        load(schema, opts) {
-            Object.assign(config, opts);
-            const db = getDb(config);
-            this._db = db;
+		const table = cfg.table || "settings";
+		ensureTable(db, table);
 
-            const table = config.table || "settings";
-            ensureTable(db, table);
+		const rows = db.prepare(`SELECT * FROM "${table}"`).all() as any[];
+		const flat: Record<string, any> = {};
+		for (const row of rows) {
+			const fullPath = row.group ? `${row.group}.${row.key}` : row.key;
+			flat[fullPath] = rowToValue(row);
+		}
+		return unflattenObject(flat);
+	},
 
-            if (config.parents) {
-                for (const parent of config.parents) {
-                    if (parent && parent.driver) {
-                         parent.load({ database: db });
-                    } else if (parent && typeof parent.load === 'function') {
-                        parent.load(schema, { database: db });
-                    }
-                }
-            }
+	onUpdate(kfg, opts) {
+		const db = kfg.$store.get("db");
+		if (!db || !opts.path) return;
+		const table = this.config?.table || "settings";
+		const parts = opts.path.split(".");
+		const k = parts.pop()!;
+		const g = parts.join(".");
+		const value = opts.value;
+		const type = Array.isArray(value) ? "array" : typeof value;
+		const valStr =
+			type === "object" || type === "array"
+				? JSON.stringify(value)
+				: String(value);
+		const now = Date.now();
 
-            const rows = db.prepare(`SELECT * FROM "${table}"`).all() as any[];
-            const flat: Record<string, any> = {};
-            for (const row of rows) {
-                const fullPath = row.group ? `${row.group}.${row.key}` : row.key;
-                flat[fullPath] = rowToValue(row);
-            }
-            return unflattenObject(flat);
-        },
-
-        set(key, value) {
-            const db = this._db;
-            if (!db) return;
-            const table = config.table || "settings";
-            const parts = key.split(".");
-            const k = parts.pop()!;
-            const g = parts.join(".");
-            const type = Array.isArray(value) ? "array" : typeof value;
-            const valStr = type === "object" || type === "array" ? JSON.stringify(value) : String(value);
-            const now = Date.now();
-
-            db.prepare(
-                `INSERT INTO "${table}" (key, "group", type, value, create_at, update_at)
-                 VALUES (?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(key, "group") DO UPDATE SET
-                    value = excluded.value,
-                    type = excluded.type,
-                    update_at = excluded.update_at`,
-            ).run(k, g, type, valStr, now, now);
-        },
-
-        del(key) {
-            const db = this._db;
-            if (!db) return;
-            const table = config.table || "settings";
-            const parts = key.split(".");
-            const k = parts.pop()!;
-            const g = parts.join(".");
-            db.prepare(
-                `DELETE FROM "${table}" WHERE key = ? AND "group" = ?`,
-            ).run(k, g);
-        },
-
-        find(schema, opts) {
-            const db = this._db || getDb(config);
-            const table = opts.model;
-            ensureTable(db, table);
-
-            const queryKeys = Object.keys(opts).filter(
-                (k) => k !== "model" && k !== "relations",
-            );
-            let ids: string[] = [];
-
-            if (queryKeys.length === 0) {
-                const rows = db
-                    .prepare(`SELECT DISTINCT "group" FROM "${table}"`)
-                    .all() as any[];
-                ids = rows.map((r: any) => r.group.split(".")[0]).filter(Boolean);
-            } else {
-                const subQueries = queryKeys.map((k) => {
-                    const val = String(opts[k]);
-                    return `SELECT DISTINCT SUBSTR("group" || '.', 1, INSTR("group" || '.', '.') - 1) as id FROM "${table}" WHERE key = '${k}' AND value = '${val}'`;
-                });
-                const rows = db.prepare(subQueries.join(" INTERSECT ")).all() as any[];
-                ids = rows.map((r: any) => r.id);
-            }
-
-            if (ids.length === 0) return null;
-
-            const id = ids[0];
-            const rows = db
-                .prepare(`SELECT * FROM "${table}" WHERE "group" = ? OR "group" LIKE ?`)
-                .all(id, `${id}.%`) as any[];
-
-            const flat: Record<string, any> = {};
-            for (const row of rows) {
-                let g = row.group;
-                if (g === id) g = "";
-                else if (g.startsWith(`${id}.`)) g = g.slice(id.length + 1);
-
-                const fullPath = g ? `${g}.${row.key}` : row.key;
-                flat[fullPath] = rowToValue(row);
-            }
-            const data = unflattenObject(flat);
-            data.id = id;
-            return data;
-        },
-
-        findBy(schema, opts) {
-            // @ts-ignore
-            return this.find(schema, opts);
-        },
-
-        create(schema, data) {
-            const db = this._db || getDb(config);
-            const table = (data as any)._model;
-            ensureTable(db, table);
-
-            const id = data.id || Math.random().toString(36).substring(2, 11);
-            const flat = flattenObject(data);
-            const now = Date.now();
-
-            for (const key in flat) {
-                if (key === "_model") continue;
-                const parts = key.split(".");
-                const k = parts.pop()!;
-                const g = [id, ...parts].join(".");
-                const value = flat[key];
-                const type = Array.isArray(value) ? "array" : typeof value;
-                const valStr = type === "object" || type === "array" ? JSON.stringify(value) : String(value);
-
-                db.prepare(
-                    `INSERT INTO "${table}" (key, "group", type, value, create_at, update_at)
-                     VALUES (?, ?, ?, ?, ?, ?)`,
-                ).run(k, g, type, valStr, now, now);
-            }
-            data.id = id;
-            return data;
-        },
-
-        update(schema, id, data) {
-            const db = this._db || getDb(config);
-            const table = (data as any)._model;
-            ensureTable(db, table);
-
-            const flat = flattenObject(data);
-            const now = Date.now();
-
-            for (const key in flat) {
-                if (key === "_model" || key === "id") continue;
-                const parts = key.split(".");
-                const k = parts.pop()!;
-                const g = [id, ...parts].join(".");
-                const value = flat[key];
-                const type = Array.isArray(value) ? "array" : typeof value;
-                const valStr = type === "object" || type === "array" ? JSON.stringify(value) : String(value);
-
-                db.prepare(
-                    `INSERT INTO "${table}" (key, "group", type, value, create_at, update_at)
-                     VALUES (?, ?, ?, ?, ?, ?)
-                     ON CONFLICT(key, "group") DO UPDATE SET
+		const queue = kfg.$store.get("queue", []);
+		queue.push(() => {
+			db.prepare(
+				`INSERT INTO "${table}" (key, "group", type, value, create_at, update_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(key, "group") DO UPDATE SET
                         value = excluded.value,
                         type = excluded.type,
                         update_at = excluded.update_at`,
-                ).run(k, g, type, valStr, now, now);
-            }
-            return data;
-        },
+			).run(k, g, type, valStr, now, now);
+		});
+		kfg.$store.set("queue", queue);
+	},
 
-        delete(schema, id, opts) {
-            const db = this._db || getDb(config);
-            const table = opts.model;
-            if (!table) throw new Error("Model name not provided for delete");
-            ensureTable(db, table);
+	onDelete(kfg, opts) {
+		const db = kfg.$store.get("db");
+		if (!db || !opts.path) return;
+		const table = this.config?.table || "settings";
+		const parts = opts.path.split(".");
+		const k = parts.pop()!;
+		const g = parts.join(".");
 
-            db.prepare(`DELETE FROM "${table}" WHERE "group" = ? OR "group" LIKE ?`).run(
-                id,
-                `${id}.%`,
-            );
-        }
+		const queue = kfg.$store.get("queue", []);
+		queue.push(() => {
+			db.prepare(`DELETE FROM "${table}" WHERE key = ? AND "group" = ?`).run(
+				k,
+				g,
+			);
+		});
+		kfg.$store.set("queue", queue);
+	},
 
-    };
+	save(kfg) {
+		const db = kfg.$store.get("db");
+		const queue = kfg.$store.get("queue", []);
+		if (!db || queue.length === 0) return;
+
+		const transaction = db.transaction(() => {
+			for (const query of queue) {
+				query();
+			}
+		});
+
+		transaction();
+		kfg.$store.set("queue", []);
+	},
 });
 --- END OF FILE: src/drivers/sqlite-driver.ts ---
-
---- START OF FILE: src/kfg-ml.ts ---
-import type { Driver, DriverFactory } from "./types";
-import type { Model } from "./model";
-import type { Migration } from "./migration";
-
-export interface KfgMLOptions {
-	models: Model<any>[];
-    migrations?: Migration[];
-}
-
-export class KfgML<D extends Driver<any>> {
-    public driver: D;
-    public factory: DriverFactory<any, any>;
-    public models: Model<any>[];
-    public migrations: Migration[];
-
-	constructor(
-		driverOrFactory: D | DriverFactory<any, any>,
-		public options: KfgMLOptions,
-	) {
-        if (typeof driverOrFactory === 'function') {
-            this.factory = driverOrFactory;
-            this.driver = driverOrFactory({}) as D;
-        } else {
-            this.driver = driverOrFactory;
-            this.factory = () => driverOrFactory; 
-        }
-        this.models = options.models;
-        this.migrations = options.migrations || [];
-		this.init();
-	}
-
-	private init() {
-		for (const model of this.models) {
-			model.setDriver(this.driver, this.factory);
-		}
-	}
-
-    public getModel(name: string): Model<any> | undefined {
-        return this.models.find(m => m.name === name);
-    }
-
-    public async migrate() {
-        // Simple implementation: run all migrations in sequence
-        // In a real scenario, we'd check which ones were already run.
-        for (const migration of this.migrations) {
-            console.log(`[KfgML] Running migration: ${migration.name}`);
-            await migration.up(this.driver);
-        }
-    }
-}
-
---- END OF FILE: src/kfg-ml.ts ---
 
 --- START OF FILE: src/utils/schema.ts ---
 import {
@@ -1255,364 +1175,308 @@ import type { Statement } from "bun:sqlite";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-type BunSqlite = typeof import('bun:sqlite').Database;
-type NodeSqlite = typeof import('node:sqlite').DatabaseSync;
-type BetterSqlite = typeof import('better-sqlite3');
+type BunSqlite = typeof import("bun:sqlite").Database;
+type NodeSqlite = typeof import("node:sqlite").DatabaseSync;
+type BetterSqlite = typeof import("better-sqlite3");
 
 export async function loadSqliteDatabase() {
-    const firsttry = (typeof Bun !== "undefined") ? "bun:sqlite" : "node:sqlite";
-    let sqlite: (BunSqlite | NodeSqlite | BetterSqlite);
-    let moduleType: string;
+	const firsttry = typeof Bun !== "undefined" ? "bun:sqlite" : "node:sqlite";
+	let sqlite: BunSqlite | NodeSqlite | BetterSqlite;
+	let moduleType: string;
 
-    try {
-        if (firsttry === "bun:sqlite") {
-             const m = await import("bun:sqlite");
-             sqlite = m.Database;
-             moduleType = "bun:sqlite";
-        } else {
-             const m = await import("node:sqlite");
-             sqlite = m.DatabaseSync;
-             moduleType = "node:sqlite";
-        }
-    } catch {
-        try {
-            // not supported use module better-sqlite3
-            const m = await import("better-sqlite3");
-            sqlite = m?.default || m;
-            moduleType = "better-sqlite3";
-        } catch {
-            throw new Error("Bun, node and better-sqlite3 database not found, update your environment");
-        }
-    }
+	try {
+		if (firsttry === "bun:sqlite") {
+			const m = await import("bun:sqlite");
+			sqlite = m.Database;
+			moduleType = "bun:sqlite";
+		} else {
+			const m = await import("node:sqlite");
+			sqlite = m.DatabaseSync;
+			moduleType = "node:sqlite";
+		}
+	} catch {
+		try {
+			// not supported use module better-sqlite3
+			const m = await import("better-sqlite3");
+			sqlite = m?.default || m;
+			moduleType = "better-sqlite3";
+		} catch {
+			throw new Error(
+				"Bun, node and better-sqlite3 database not found, update your environment",
+			);
+		}
+	}
 
-    return class KfgDatabase {
-        db: InstanceType<BunSqlite | NodeSqlite> | import('better-sqlite3').Database;
-        module_type: string;
+	return class KfgDatabase {
+		db:
+			| InstanceType<BunSqlite | NodeSqlite>
+			| import("better-sqlite3").Database;
+		module_type: string;
 
-        constructor(path: string) {
-            this.module_type = moduleType;
-            const dir = dirname(path);
-            if (!existsSync(dir) && path !== ":memory:") {
-                mkdirSync(dir, { recursive: true });
-            }
-            
-            this.db = new sqlite(path);
-        }
+		constructor(path: string) {
+			this.module_type = moduleType;
+			const dir = dirname(path);
+			if (!existsSync(dir) && path !== ":memory:") {
+				mkdirSync(dir, { recursive: true });
+			}
 
-        exec(sql: string): void {
-            this.db.exec(sql);
-        }
+			this.db = new sqlite(path);
+		}
 
-        prepare(sql: string) {
-            const stmt = (this.db as any).prepare(sql) as Statement;
-            
-            return {
-                all: (...params: any[]) => {
-                    return stmt.all(...params);
-                },
-                get: (...params: any[]) => {
-                    return stmt.get(...params);
-                },
-                run: (...params: any[]) => {
-                    return stmt.run(...params);
-                },
-                finalize: () => {
-                    if ("finalize" in stmt) stmt.finalize();
-                }
-            };
-        }
-        
-        close() {
-            this.db.close();
-        }
-    }
-}
---- END OF FILE: src/utils/sqlite.ts ---
+		exec(sql: string): void {
+			this.db.exec(sql);
+		}
 
---- START OF FILE: src/kfg-driver.ts ---
-import { Value } from "@sinclair/typebox/value";
-import type { Driver, DriverConfig, DriverFactory, SchemaDefinition, inPromise } from "./types";
-import { addSmartDefaults, buildTypeBoxSchema } from "./utils/schema";
-import { getProperty, setProperty, deleteProperty, deepMerge } from "./utils/object";
+		prepare(sql: string) {
+			const stmt = (this.db as any).prepare(sql) as Statement;
 
-/**
- * Creates a new Kfg Driver factory.
- * @param factory The factory function that initializes the driver logic.
- */
-export function kfgDriver<C extends DriverConfig = any>(
-	factory: (opts: Partial<C>) => Omit<Driver<any>, "load" | "set" | "del" | "has" | "inject" | "get"> &
-             Partial<Pick<Driver<any>, "load" | "set" | "del" | "has" | "inject" | "get">>
-): DriverFactory<C, any> {
-	return (config: Partial<C>) => {
-		const partialDriver = factory(config);
-		const async = partialDriver.async;
-        let _data: any = {};
+			return {
+				all: (...params: any[]) => {
+					return stmt.all(...params);
+				},
+				get: (...params: any[]) => {
+					return stmt.get(...params);
+				},
+				run: (...params: any[]) => {
+					return stmt.run(...params);
+				},
+				finalize: () => {
+					if ("finalize" in stmt) stmt.finalize();
+				},
+			};
+		}
 
-		const driver: Driver<any> = {
-			...partialDriver,
-            
-			load(schema: SchemaDefinition, opts?: any): inPromise<boolean, any> {
-                const validate = (data: any) => {
-                     const compiledSchema = buildTypeBoxSchema(schema);
-                     addSmartDefaults(compiledSchema);
-                     const configWithDefaults = Value.Default(compiledSchema, data) as any;
-                     Value.Convert(compiledSchema, configWithDefaults);
-                     
-                     if (!Value.Check(compiledSchema, configWithDefaults)) {
-                        const errors = [...Value.Errors(compiledSchema, configWithDefaults)];
-                        throw new Error(
-                            `[Kfg] Validation failed:\n${errors
-                                .map((e) => `- ${e.path}: ${e.message}`)
-                                .join("\n")}`,
-                        );
-                    }
-                    return configWithDefaults;
-                }
-
-                const runLoad = () => {
-                    if (partialDriver.load) {
-                        const result = partialDriver.load.call(driver, schema, opts);
-                        if (async) {
-                            return (result as Promise<any>).then(res => {
-                                const validated = validate(res);
-                                _data = validated;
-                                return validated;
-                            }) as any;
-                        }
-                        const validated = validate(result);
-                        _data = validated;
-                        return validated;
-                    }
-                    return (async ? Promise.resolve(validate(_data)) : validate(_data)) as any;
-                };
-
-                if (partialDriver.onRequest) {
-                    const req = partialDriver.onRequest.call(driver);
-                    if (async) return (req as Promise<void>).then(() => runLoad());
-                    return runLoad();
-                }
-                return runLoad();
-			},
-
-			get(key?: string): inPromise<boolean, any> {
-                const runGet = () => {
-                    if (partialDriver.get) return partialDriver.get.call(driver, key);
-                    if (!key) return _data;
-                    return getProperty(_data, key);
-                };
-                if (partialDriver.onRequest) {
-                    const req = partialDriver.onRequest.call(driver);
-                    if (async) return (req as Promise<void>).then(() => runGet());
-                    return runGet();
-                }
-                return runGet();
-            },
-
-			set(key: string, value: any, options?: any): inPromise<boolean, void> {
-                const runSet = () => {
-                    setProperty(_data, key, value);
-                    if (partialDriver.set) {
-                        return partialDriver.set.call(driver, key, value, options);
-                    }
-                    return (async ? Promise.resolve() : undefined) as any;
-                };
-
-                if (partialDriver.onRequest) {
-                    const req = partialDriver.onRequest.call(driver);
-                    if (async) return (req as Promise<void>).then(() => runSet());
-                    return runSet();
-                }
-                return runSet();
-			},
-
-            has(...keys: string[]): inPromise<boolean, boolean> {
-                const runHas = () => {
-                    if (partialDriver.has) return partialDriver.has.call(driver, ...keys);
-                    return keys.every(key => getProperty(_data, key) !== undefined);
-                };
-                if (partialDriver.onRequest) {
-                    const req = partialDriver.onRequest.call(driver);
-                    if (async) return (req as Promise<void>).then(() => runHas());
-                    return runHas();
-                }
-                return runHas();
-            },
-
-			del(key: string, options?: any): inPromise<boolean, void> {
-                const runDel = () => {
-                    deleteProperty(_data, key);
-                    if (partialDriver.del) {
-                        return partialDriver.del.call(driver, key, options);
-                    }
-                    return (async ? Promise.resolve() : undefined) as any;
-                };
-
-                if (partialDriver.onRequest) {
-                    const req = partialDriver.onRequest.call(driver);
-                    if (async) return (req as Promise<void>).then(() => runDel());
-                    return runDel();
-                }
-                return runDel();
-			},
-
-            inject(data: any): inPromise<boolean, void> {
-                const runInject = () => {
-                    _data = deepMerge(_data, data);
-                    if (partialDriver.inject) return partialDriver.inject.call(driver, data);
-                    return (async ? Promise.resolve() : undefined) as any;
-                };
-                if (partialDriver.onRequest) {
-                    const req = partialDriver.onRequest.call(driver);
-                    if (async) return (req as Promise<void>).then(() => runInject());
-                    return runInject();
-                }
-                return runInject();
-            },
-            
-            unmount() {
-                if (partialDriver.unmount) {
-                    partialDriver.unmount.call(driver);
-                }
-            }
-		};
-
-		return driver;
+		close() {
+			this.db.close();
+		}
 	};
 }
 
-// For compatibility if needed
-export type KfgDriver<C, S, A> = Driver<boolean>;
+--- END OF FILE: src/utils/sqlite.ts ---
+
+--- START OF FILE: src/kfg-driver.ts ---
+import type {
+	Driver,
+	DriverConfig,
+	inPromise,
+} from "./types";
+import {
+	deleteProperty,
+	getProperty,
+	setProperty,
+} from "./utils/object";
+
+/**
+ * The base class for all drivers.
+ * @template C The type of the driver configuration.
+ * @template Async The type of the async flag.
+ */
+export class KfgDriver<C extends DriverConfig, Async extends boolean>
+	implements Driver<Async, C>
+{
+	public readonly identify: string;
+	public async: Async;
+	public config: C;
+
+	// Hooks from the Driver interface
+	public onMount?: Driver<Async, C>["onMount"];
+	public onUnmount?: Driver<Async, C>["onUnmount"];
+	public onRequest?: Driver<Async, C>["onRequest"];
+	public onGet?: Driver<Async, C>["onGet"];
+	public onUpdate?: Driver<Async, C>["onUpdate"];
+	public onDelete?: Driver<Async, C>["onDelete"];
+	public onMerge?: Driver<Async, C>["onMerge"];
+	public onHas?: Driver<Async, C>["onHas"];
+	public onInject?: Driver<Async, C>["onInject"];
+	public onToJSON?: Driver<Async, C>["onToJSON"];
+	public save?: Driver<Async, C>["save"];
+
+	/**
+	 * Creates a new instance of KfgDriver.
+	 * @param definition The driver definition.
+	 */
+	constructor(public readonly definition: Driver<Async, C>) {
+		this.identify = definition.identify;
+		this.async = definition.async;
+		this.config = (definition.config || {}) as C;
+
+		this.onMount = definition.onMount;
+		this.onUnmount = definition.onUnmount;
+		this.onRequest = definition.onRequest;
+		this.onGet = definition.onGet;
+		this.onUpdate = definition.onUpdate;
+		this.onDelete = definition.onDelete;
+		this.onMerge = definition.onMerge;
+		this.onHas = definition.onHas;
+		this.onInject = definition.onInject;
+		this.onToJSON = definition.onToJSON;
+		this.save = definition.save;
+	}
+
+	/**
+	 * Mounts the driver.
+	 */
+	public mount(kfg: any, opts?: any): inPromise<Async, any> {
+		if (this.onMount) {
+			return this.onMount(kfg, opts);
+		}
+		return (this.async ? Promise.resolve() : undefined) as any;
+	}
+
+	/**
+	 * Unmounts the driver.
+	 */
+	public unmount(kfg: any): void {
+		if (this.onUnmount) {
+			this.onUnmount(kfg);
+		}
+	}
+
+	/**
+	 * Called before an operation.
+	 */
+	public request(kfg: any, opts: any): inPromise<Async, void> {
+		if (this.onRequest) {
+			return this.onRequest(kfg, opts);
+		}
+		return (this.async ? Promise.resolve() : undefined) as any;
+	}
+
+	public get(kfg: any, key?: string): inPromise<Async, any> {
+		const run = () => {
+			if (this.onGet) {
+				return this.onGet(kfg, { path: key });
+			}
+			const data = kfg.$store.get("data", {});
+			if (!key) return data;
+			return getProperty(data, key);
+		};
+
+		if (this.async) {
+			return this.request(kfg, { path: key }).then(run) as any;
+		}
+		this.request(kfg, { path: key });
+		return run() as any;
+	}
+
+	public set(
+		kfg: any,
+		key: string,
+		value: any,
+		options?: { description?: string },
+	): inPromise<Async, void> {
+		const run = () => {
+			const data = kfg.$store.get("data", {});
+			setProperty(data, key, value);
+			kfg.$store.set("data", data);
+
+			if (this.onUpdate) {
+				return this.onUpdate(kfg, { path: key, value, ...options });
+			}
+		};
+
+		if (this.async) {
+			return this.request(kfg, { path: key, value, ...options }).then(
+				run,
+			) as any;
+		}
+		this.request(kfg, { path: key, value, ...options });
+		return run() as any;
+	}
+
+	public has(kfg: any, ...keys: string[]): inPromise<Async, boolean> {
+		const run = () => {
+			if (this.onHas) {
+				return this.onHas(kfg, { paths: keys });
+			}
+			const data = kfg.$store.get("data", {});
+			return keys.every((key) => getProperty(data, key) !== undefined);
+		};
+
+		if (this.async) {
+			return this.request(kfg, { paths: keys }).then(run) as any;
+		}
+		this.request(kfg, { paths: keys });
+		return run() as any;
+	}
+
+	public del(kfg: any, key: string, options?: any): inPromise<Async, void> {
+		const run = () => {
+			const data = kfg.$store.get("data", {});
+			deleteProperty(data, key);
+			kfg.$store.set("data", data);
+
+			if (this.onDelete) {
+				return this.onDelete(kfg, { path: key, ...options });
+			}
+		};
+
+		if (this.async) {
+			return this.request(kfg, { path: key, ...options }).then(run) as any;
+		}
+		this.request(kfg, { path: key, ...options });
+		return run() as any;
+	}
+
+	public saveTo(kfg: any, data?: any): inPromise<Async, void> {
+		const run = () => {
+			if (this.save) {
+				return this.save(kfg, data);
+			}
+		};
+		if (this.async) {
+			return this.request(kfg, { data }).then(run) as any;
+		}
+		this.request(kfg, { data });
+		return run() as any;
+	}
+
+	public inject(kfg: any, data: any): inPromise<Async, void> {
+		const run = () => {
+			kfg.$store.merge("data", data);
+			if (this.onMerge) {
+				return this.onMerge(kfg, { data });
+			}
+			if (this.onInject) {
+				return this.onInject(kfg, { data });
+			}
+		};
+
+		if (this.async) {
+			return this.request(kfg, { data }).then(run) as any;
+		}
+		this.request(kfg, { data });
+		return run() as any;
+	}
+
+	public toJSON(kfg: any): inPromise<Async, any> {
+		const run = () => {
+			if (this.onToJSON) {
+				return this.onToJSON(kfg);
+			}
+			return kfg.$store.get("data");
+		};
+		if (this.async) {
+			return this.request(kfg, {}).then(run) as any;
+		}
+		this.request(kfg, {});
+		return run() as any;
+	}
+}
+
 --- END OF FILE: src/kfg-driver.ts ---
-
---- START OF FILE: src/model.ts ---
-import { Kfg } from "./kfg";
-import type { Driver, DriverFactory, SchemaDefinition, StaticSchema, inPromise } from "./types";
-
-export interface ModelOptions<S extends SchemaDefinition> {
-    name: string;
-    type?: 'many' | 'one';
-    unique?: string;
-    schema: S;
-    onCreate?: (data: any) => any;
-    onUpdate?: (data: any) => any;
-    onDelete?: (data: any) => any;
-}
-
-export class Model<S extends SchemaDefinition> {
-    public name: string;
-    public type: 'many' | 'one' = 'many';
-    public unique: string = 'id';
-    public schema: S;
-    public driver?: Driver<any>;
-    public factory?: DriverFactory<any, any>;
-    
-    private onCreate?: (data: any) => any;
-    private onUpdate?: (data: any) => any;
-    private onDelete?: (data: any) => any;
-
-    constructor(nameOrOptions: string | ModelOptions<S>) {
-        if (typeof nameOrOptions === 'string') {
-            this.name = nameOrOptions;
-            this.schema = {} as S;
-        } else {
-            this.name = nameOrOptions.name;
-            this.type = nameOrOptions.type || 'many';
-            this.unique = nameOrOptions.unique || 'id';
-            this.schema = nameOrOptions.schema;
-            this.onCreate = nameOrOptions.onCreate;
-            this.onUpdate = nameOrOptions.onUpdate;
-            this.onDelete = nameOrOptions.onDelete;
-        }
-    }
-
-    public setDriver(driver: Driver<any>, factory: DriverFactory<any, any>) {
-        this.driver = driver;
-        this.factory = factory;
-    }
-
-    private checkDriver() {
-        if (!this.driver || !this.factory) {
-            throw new Error(`[Model ${this.name}] Driver or Factory not set. Use KfgML to load the model.`);
-        }
-    }
-
-    public find(query: any): inPromise<boolean, Kfg<any, S>> {
-        this.checkDriver();
-        
-        const result = this.driver!.find!(this.schema, {
-            ...query,
-            model: this.name
-        });
-
-        const createInstance = (data: any) => {
-            if (!data) return null;
-            
-            // Create a fresh driver instance for the record using the factory
-            const recordDriver = this.factory!({});
-
-            const kfg = new Kfg(recordDriver, this.schema);
-            kfg.hydrate(data);
-            return kfg;
-        };
-
-        if (this.driver!.async) {
-            return (result as Promise<any>).then(createInstance) as any;
-        }
-        return createInstance(result) as any;
-    }
-    
-    public findBy(field: string, value: any): inPromise<boolean, Kfg<any, S>> {
-        return this.find({ [field]: value });
-    }
-
-    public create(data: Partial<StaticSchema<S>>): inPromise<boolean, Kfg<any, S>> {
-        this.checkDriver();
-        
-        const result = this.driver!.create!(this.schema, {
-            ...data,
-            _model: this.name
-        });
-
-        const createInstance = (data: any) => {
-            const recordDriver = this.factory!({});
-            const kfg = new Kfg(recordDriver, this.schema);
-            kfg.hydrate(data);
-            return kfg;
-        };
-
-        if (this.driver!.async) {
-            return (result as Promise<any>).then(createInstance) as any;
-        }
-        return createInstance(result) as any;
-    }
-
-    public update(id: string | number, data: Partial<StaticSchema<S>>): inPromise<boolean, void> {
-        this.checkDriver();
-        return this.driver!.update!(this.schema, id, {
-            ...data,
-            _model: this.name
-        }) as any;
-    }
-
-    public delete(id: string | number): inPromise<boolean, void> {
-        this.checkDriver();
-        return this.driver!.delete!(this.schema, id) as any;
-    }
-}
---- END OF FILE: src/model.ts ---
 
 --- START OF FILE: src/types.ts ---
 import type {
 	SchemaOptions,
 	Static,
+	TAny,
 	TObject,
 	TSchema,
-	TUnsafe,
 } from "@sinclair/typebox";
+import type { Kfg } from "./kfg";
+import type { KfgDriver } from "./kfg-driver";
 export type { TSchema, TObject, SchemaOptions };
-
-import type { Model } from "./model";
-import type { KfgML } from "./kfg-ml";
 
 // --- Driver Related Types ---
 
@@ -1622,14 +1486,14 @@ import type { KfgML } from "./kfg-ml";
  */
 export type Paths<T> = T extends object
 	? {
-			[K in keyof T]: K extends string
-				? T[K] extends ReadonlyArray<any>
-					? K
-					: T[K] extends object
-						? `${K}.${Paths<T[K]>}` | K
-						: K
-				: never;
-		}[keyof T]
+		[K in keyof T]: K extends string
+		? T[K] extends ReadonlyArray<any>
+		? K
+		: T[K] extends object
+		? `${K}.${Paths<T[K]>}` | K
+		: K
+		: never;
+	}[keyof T]
 	: never;
 
 /**
@@ -1638,14 +1502,14 @@ export type Paths<T> = T extends object
  */
 export type RootPaths<T> = T extends object
 	? {
-			[K in keyof T]: K extends string
-				? T[K] extends ReadonlyArray<any>
-					? K
-					: T[K] extends object
-						? K | `${K}.${RootPaths<T[K]>}`
-						: never
-				: never;
-		}[keyof T]
+		[K in keyof T]: K extends string
+		? T[K] extends ReadonlyArray<any>
+		? K
+		: T[K] extends object
+		? K | `${K}.${RootPaths<T[K]>}`
+		: never
+		: never;
+	}[keyof T]
 	: never;
 
 /**
@@ -1655,11 +1519,11 @@ export type RootPaths<T> = T extends object
  */
 export type DeepGet<T, P extends string> = P extends `${infer K}.${infer R}`
 	? K extends keyof T
-		? DeepGet<T[K], R>
-		: never
+	? DeepGet<T[K], R>
+	: never
 	: P extends keyof T
-		? T[P]
-		: never;
+	? T[P]
+	: never;
 
 /**
  * Represents a value that can be a promise or a plain value.
@@ -1676,41 +1540,24 @@ export type inPromise<Async extends boolean, Result> = Async extends true
 export type DriverConfig = Record<any, any>;
 
 /**
- * The interface for a Functional Driver instance.
- * @template A Async flag
+ * The interface for a Driver definition.
  */
-export interface Driver<A extends boolean> {
-	name: string;
-	async: A;
-	model?: boolean;
-
-	load(schema: SchemaDefinition, opts?: any): inPromise<A, any>;
-	get(key?: string): inPromise<A, any>;
-	set(key: string, value: any, options?: { description?: string, data?: any }): inPromise<A, void>;
-	has(...keys: string[]): inPromise<A, boolean>;
-	del(key: string, options?: { data?: any }): inPromise<A, void>;
-    inject(data: any): inPromise<A, void>;
-
-    /** Called before operations like get, set, del, etc. */
-    onRequest?(): inPromise<A, void>;
-    /** Called when the driver is no longer needed or updated. */
-    unmount?(): void;
-
-	// Optional Model methods
-	find?(schema: SchemaDefinition, opts: any): any;
-	findBy?(schema: SchemaDefinition, opts: any): any;
-	create?(schema: SchemaDefinition, data: any): any;
-	update?(schema: SchemaDefinition, id: any, data: any): any;
-	delete?(schema: SchemaDefinition, id: any): any;
+export interface Driver<AsyncDriver extends boolean, Config extends DriverConfig = {}> {
+	identify: string;
+	async: AsyncDriver;
+	config?: Partial<Config>;
+	onMount?: (kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>, opts?: any) => inPromise<AsyncDriver, any>;
+	onUnmount?: (kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>) => void;
+	onRequest?: (kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>, opts: any) => inPromise<AsyncDriver, void>;
+	onGet?: (kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>, opts: any) => inPromise<AsyncDriver, any>;
+	onUpdate?: (kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>, opts: any) => inPromise<AsyncDriver, void>;
+	onDelete?: (kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>, opts: any) => inPromise<AsyncDriver, void>;
+	onMerge?: (kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>, opts: any) => inPromise<AsyncDriver, void>;
+	onHas?: (kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>, opts: any) => inPromise<AsyncDriver, boolean>;
+	onInject?: (kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>, opts: any) => inPromise<AsyncDriver, void>;
+	onToJSON?: (kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>) => inPromise<AsyncDriver, any>;
+	save?: (kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>, data?: any) => inPromise<AsyncDriver, void>;
 }
-
-/**
- * Factory function type to create a driver.
- */
-export type DriverFactory<C extends DriverConfig, A extends boolean> = (
-	config: Partial<C>,
-) => Driver<A>;
-
 
 // --- Schema Related Types ---
 
@@ -1720,8 +1567,8 @@ export type DriverFactory<C extends DriverConfig, A extends boolean> = (
 export type SchemaDefinition =
 	| TSchema // Qualquer schema TypeBox válido (string, number, array, etc.)
 	| {
-			[key: string]: SchemaDefinition;
-	  };
+		[key: string]: SchemaDefinition;
+	};
 /**
  * A mapped type que converte um SchemaDefinition em tipo estático TypeScript.
  * Agora com suporte a arrays do TypeBox.
@@ -1729,14 +1576,14 @@ export type SchemaDefinition =
 export type StaticSchema<T> =
 	// Se for um array TypeBox, transforma no tipo do item[]
 	T extends { type: "array"; items: infer I }
-		? StaticSchema<I>[]
-		: // Se for qualquer TSchema simples
-			T extends TSchema
-			? Static<T>
-			: // Se for um objeto SchemaDefinition, aplica recursivamente
-				T extends SchemaDefinition
-				? { -readonly [K in keyof T]: StaticSchema<T[K]> }
-				: never;
+	? StaticSchema<I>[]
+	: // Se for qualquer TSchema simples
+	T extends TSchema
+	? Static<T>
+	: // Se for um objeto SchemaDefinition, aplica recursivamente
+	T extends SchemaDefinition
+	? { -readonly [K in keyof T]: StaticSchema<T[K]> }
+	: never;
 
 /**
  * Custom metadata properties that can be added to a schema.
@@ -1748,10 +1595,37 @@ export interface CustomOptions<Default = any> {
 	initial_save?: boolean;
 	prop?: string;
 	refines?: ((value: unknown) => boolean | string)[];
-    model?: Model<any>;
-    createms?: boolean;
+	createms?: boolean;
 }
 --- END OF FILE: src/types.ts ---
+
+--- START OF FILE: src/store.ts ---
+import { deepMerge } from "./utils/object";
+
+export class KfgStore {
+	private map = new Map<string, any>();
+
+	public get<T>(key: string, defaultValue?: T): T {
+		return (this.map.get(key) ?? defaultValue) as T;
+	}
+
+	public set<T>(key: string, value: T): void {
+		this.map.set(key, value);
+	}
+
+	public merge<T extends object>(key: string, value: Partial<T>): void {
+		const current = this.get<T>(key, {} as T);
+		this.set(key, deepMerge(current, value));
+	}
+
+	public insert<T extends object>(key: string, value: Partial<T>): void {
+		const current = this.get<T>(key, {} as T);
+		Object.assign(current as any, value);
+		this.set(key, current);
+	}
+}
+
+--- END OF FILE: src/store.ts ---
 
 --- START OF FILE: src/factory.ts ---
 import {
@@ -1886,27 +1760,27 @@ const _c = {
 		});
 	},
 
-    /** Creates a Model relation schema. */
-    Model: (
-        model: any,
-        resolver?: (instance: any) => any,
-        options?: CustomOptions<any>
-    ) => {
-        return Type.Any({
-            ...options,
-            model,
-            resolver
-        });
-    },
+	/** Creates a Model relation schema. */
+	Model: (
+		model: any,
+		resolver?: (instance: any) => any,
+		options?: CustomOptions<any>,
+	) => {
+		return Type.Any({
+			...options,
+			model,
+			resolver,
+		});
+	},
 
-    /** Creates a number schema that defaults to current timestamp in ms. */
-    createms: (options?: NumberOptions & CustomOptions<number>) => {
-        return Type.Number({
-            ...options,
-            createms: true,
-            default: Date.now()
-        });
-    }
+	/** Creates a number schema that defaults to current timestamp in ms. */
+	createms: (options?: NumberOptions & CustomOptions<number>) => {
+		return Type.Number({
+			...options,
+			createms: true,
+			default: Date.now(),
+		});
+	},
 };
 
 /**
@@ -1929,33 +1803,10 @@ export const c = {
 	any: _c.Any,
 	optional: _c.Optional,
 	random: _c.Random,
-    model: _c.Model,
-    createms: _c.createms,
+	model: _c.Model,
+	createms: _c.createms,
 };
 export const k = c;
 export const m = c;
+
 --- END OF FILE: src/factory.ts ---
-
---- START OF FILE: src/migration.ts ---
-import type { Driver } from "./types";
-import type { KfgML } from "./kfg-ml";
-
-export interface MigrationOptions {
-    name: string;
-    up: (driver: Driver<any>) => void | Promise<void>;
-    down: (ml: KfgML<any>) => void | Promise<void>;
-}
-
-export class Migration {
-    public name: string;
-    public up: (driver: Driver<any>) => void | Promise<void>;
-    public down: (ml: KfgML<any>) => void | Promise<void>;
-
-    constructor(options: MigrationOptions) {
-        this.name = options.name;
-        this.up = options.up;
-        this.down = options.down;
-    }
-}
-
---- END OF FILE: src/migration.ts ---

@@ -1,0 +1,21 @@
+{
+    "additionalProperties": true,
+    "type": "object",
+    "properties": {
+        "app": {
+            "additionalProperties": true,
+            "type": "object",
+            "properties": {
+                "token": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "token"
+            ]
+        }
+    },
+    "required": [
+        "app"
+    ]
+}

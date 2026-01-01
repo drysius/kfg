@@ -1,7 +1,7 @@
 import { expect, test, afterAll } from "bun:test";
 import * as fs from "node:fs";
 import { Kfg } from "../src/kfg";
-import { jsonDriver } from "../src/drivers/json-driver";
+import { JsonDriver } from "../src/drivers/json-driver";
 import { Type } from "@sinclair/typebox";
 
 const TEST_CONFIG_PATH_1 = "test-config-1.json";
@@ -24,7 +24,7 @@ test("Kfg instances should clone the driver and have independent state", () => {
     // If we use the SAME file, they naturally see the same data if they reload.
     // We want to test IN-MEMORY isolation.
     
-    const driver = jsonDriver; // The global const
+    const driver = JsonDriver; // The global const
     
     const kfg1 = new Kfg(driver, schema);
     const kfg2 = new Kfg(driver, schema);
@@ -48,7 +48,7 @@ test("Kfg instances should clone the driver and have independent state", () => {
 });
 
 test("Kfg inject should merge data deeply", () => {
-    const kfg = new Kfg(jsonDriver, schema);
+    const kfg = new Kfg(JsonDriver, schema);
     kfg.load({ path: TEST_CONFIG_PATH_1 }); // Reusing file is fine here, we overwrite memory
 
     kfg.inject({

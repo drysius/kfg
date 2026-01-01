@@ -1,178 +1,216 @@
-import { Value } from "@sinclair/typebox/value";
-import type {
-	Driver,
-	DriverConfig,
-	DriverFactory,
-	SchemaDefinition,
-	inPromise,
-} from "./types";
-import {
-	deepMerge,
-	deleteProperty,
-	getProperty,
-	setProperty,
-} from "./utils/object";
-import { addSmartDefaults, buildTypeBoxSchema } from "./utils/schema";
-
-type DriverImplementation = Omit<
-	Driver<any>,
-	"load" | "set" | "del" | "has" | "inject" | "get">
-&
-	Partial<
-		Pick<Driver<any>, "load" | "set" | "del" | "has" | "inject" | "get">
-	>;
+import type { Driver, DriverConfig, inPromise } from "./types";
 
 /**
- * Creates a new Kfg Driver factory.
- * @param factory The factory function that initializes the driver logic.
+ * The base class for all drivers.
+ * @template C The type of the driver configuration.
+ * @template Async The type of the async flag.
  */
-export function kfgDriver< 
-	C extends DriverConfig = any,
-	T extends Record<string, any> = {},
->(
-	factory: (opts: Partial<C>) => T & DriverImplementation,
-): DriverFactory<C, any> {
-	return (config: Partial<C>) => {
-		const partialDriver = factory(config);
-		const async = partialDriver.async;
-		let _data: any = {};
+export class KfgDriver<C extends DriverConfig, Async extends boolean>
+	implements Driver<Async, C>
+{
+	public readonly identify: string;
+	public readonly async;
+	public config: C;
 
-		const driver: Driver<any> & T = {
-			...partialDriver,
+	// Hooks from the Driver interface
+	public onMount?: Driver<Async, C>["onMount"];
+	public onUnmount?: Driver<Async, C>["onUnmount"];
+	public onRequest?: Driver<Async, C>["onRequest"];
+	public onGet?: Driver<Async, C>["onGet"];
+	public onUpdate?: Driver<Async, C>["onUpdate"];
+	public onDelete?: Driver<Async, C>["onDelete"];
+	public onMerge?: Driver<Async, C>["onMerge"];
+	public onHas?: Driver<Async, C>["onHas"];
+	public onInject?: Driver<Async, C>["onInject"];
+	public onToJSON?: Driver<Async, C>["onToJSON"];
+	public save?: Driver<Async, C>["save"];
 
-			load(schema: SchemaDefinition, opts?: any): inPromise<boolean, any> {
-				const validate = (data: any) => {
-					const compiledSchema = buildTypeBoxSchema(schema);
-					addSmartDefaults(compiledSchema);
-					const configWithDefaults = Value.Default(compiledSchema, data) as any;
-					Value.Convert(compiledSchema, configWithDefaults);
+	/**
+	 * Creates a new instance of KfgDriver.
+	 * @param definition The driver definition.
+	 */
+	constructor(public readonly definition: Driver<Async, C>) {
+		this.identify = definition.identify;
+		this.async = definition.async;
+		this.config = (definition.config || {}) as C;
 
-					if (!Value.Check(compiledSchema, configWithDefaults)) {
-						const errors = [
-							...Value.Errors(compiledSchema, configWithDefaults),
-						];
-						throw new Error(
-							`[Kfg] Validation failed:\n${errors
-								.map((e) => `- ${e.path}: ${e.message}`)
-								.join("\n")}`,
-						);
-					}
-					return configWithDefaults;
-				};
+		this.onMount = definition.onMount;
+		this.onUnmount = definition.onUnmount;
+		this.onRequest = definition.onRequest;
+		this.onGet = definition.onGet;
+		this.onUpdate = definition.onUpdate;
+		this.onDelete = definition.onDelete;
+		this.onMerge = definition.onMerge;
+		this.onHas = definition.onHas;
+		this.onInject = definition.onInject;
+		this.onToJSON = definition.onToJSON;
+		this.save = definition.save;
+	}
 
-				const runLoad = () => {
-					if (partialDriver.load) {
-						const result = partialDriver.load.call(driver, schema, opts);
-						if (async) {
-							return (result as Promise<any>).then((res) => {
-								const validated = validate(res);
-								_data = validated;
-								return validated;
-							}) as any;
-						}
-						const validated = validate(result);
-						_data = validated;
-						return validated;
-					}
-					return (
-						async ? Promise.resolve(validate(_data)) : validate(_data)
-					) as any;
-				};
+	/**
+	 * Mounts the driver.
+	 */
+	public mount(kfg: any, opts?: any): inPromise<Async, any> {
+		if (opts) {
+			kfg.$store.set("~driver", { ...this.config, ...opts });
+		}
+		if (this.onMount) {
+			return this.onMount(kfg, opts);
+		}
+		return (this.async ? Promise.resolve() : undefined) as any;
+	}
 
-				if (partialDriver.onRequest) {
-					const req = partialDriver.onRequest.call(driver);
-					if (async) return (req as Promise<void>).then(() => runLoad());
-					return runLoad();
-				}
-				return runLoad();
-			},
+	/**
+	 * Unmounts the driver.
+	 */
+	public unmount(kfg: any): void {
+		if (this.onUnmount) {
+			this.onUnmount(kfg);
+		}
+	}
 
-			get(key?: string): inPromise<boolean, any> {
-				const runGet = () => {
-					if (partialDriver.get) return partialDriver.get.call(driver, key);
-					if (!key) return _data;
-					return getProperty(_data, key);
-				};
-				if (partialDriver.onRequest) {
-					const req = partialDriver.onRequest.call(driver);
-					if (async) return (req as Promise<void>).then(() => runGet());
-					return runGet();
-				}
-				return runGet();
-			},
+	/**
+	 * Called before an operation.
+	 */
+	public request(kfg: any, opts: any): inPromise<Async, void> {
+		if (this.onRequest) {
+			return this.onRequest(kfg, opts);
+		}
+		return (this.async ? Promise.resolve() : undefined) as any;
+	}
 
-			set(key: string, value: any, options?: any): inPromise<boolean, void> {
-				const runSet = () => {
-					setProperty(_data, key, value);
-					if (partialDriver.set) {
-						return partialDriver.set.call(driver, key, value, options);
-					}
-					return (async ? Promise.resolve() : undefined) as any;
-				};
+	public get(kfg: any, key?: string): inPromise<Async, any> {
+		const run = () => {
+			if (this.onGet) {
+				return this.onGet(kfg, { path: key });
+			}
+			throw new Error("Driver does not implement onGet");
+		};
 
-				if (partialDriver.onRequest) {
-					const req = partialDriver.onRequest.call(driver);
-					if (async) return (req as Promise<void>).then(() => runSet());
-					return runSet();
-				}
-				return runSet();
-			},
+		if (this.async) {
+			return (this.request(kfg, { path: key }) as Promise<void>).then(
+				run,
+			) as any;
+		}
+		this.request(kfg, { path: key });
+		return run() as any;
+	}
 
-			has(...keys: string[]): inPromise<boolean, boolean> {
-				const runHas = () => {
-					if (partialDriver.has) return partialDriver.has.call(driver, ...keys);
-					return keys.every((key) => getProperty(_data, key) !== undefined);
-				};
-				if (partialDriver.onRequest) {
-					const req = partialDriver.onRequest.call(driver);
-					if (async) return (req as Promise<void>).then(() => runHas());
-					return runHas();
-				}
-				return runHas();
-			},
+	public set(
+		kfg: any,
+		key: string,
+		value: any,
+		options?: { description?: string },
+	): inPromise<Async, void> {
+		const run = () => {
+			if (this.onUpdate) {
+				return this.onUpdate(kfg, { path: key, value, ...options });
+			}
+			throw new Error("Driver does not implement onUpdate");
+		};
 
-			del(key: string, options?: any): inPromise<boolean, void> {
-				const runDel = () => {
-					deleteProperty(_data, key);
-					if (partialDriver.del) {
-						return partialDriver.del.call(driver, key, options);
-					}
-					return (async ? Promise.resolve() : undefined) as any;
-				};
+		if (this.async) {
+			return (
+				this.request(kfg, { path: key, value, ...options }) as Promise<void>
+			).then(run) as any;
+		}
+		this.request(kfg, { path: key, value, ...options });
+		return run() as any;
+	}
 
-				if (partialDriver.onRequest) {
-					const req = partialDriver.onRequest.call(driver);
-					if (async) return (req as Promise<void>).then(() => runDel());
-					return runDel();
-				}
-				return runDel();
-			},
+	public has(kfg: any, ...keys: string[]): inPromise<Async, boolean> {
+		const run = () => {
+			if (this.onHas) {
+				return this.onHas(kfg, { paths: keys });
+			}
+			throw new Error("Driver does not implement onHas");
+		};
 
-			inject(data: any): inPromise<boolean, void> {
-				const runInject = () => {
-					_data = deepMerge(_data, data);
-					if (partialDriver.inject)
-						return partialDriver.inject.call(driver, data);
-					return (async ? Promise.resolve() : undefined) as any;
-				};
-				if (partialDriver.onRequest) {
-					const req = partialDriver.onRequest.call(driver);
-					if (async) return (req as Promise<void>).then(() => runInject());
-					return runInject();
-				}
-				return runInject();
-			},
+		if (this.async) {
+			return (this.request(kfg, { paths: keys }) as Promise<void>).then(
+				run,
+			) as any;
+		}
+		this.request(kfg, { paths: keys });
+		return run() as any;
+	}
 
-			unmount() {
-				if (partialDriver.unmount) {
-					partialDriver.unmount.call(driver);
-				}
-			},
-		} as Driver<any> & T;
+	public del(kfg: any, key: string, options?: any): inPromise<Async, void> {
+		const run = () => {
+			if (this.onDelete) {
+				return this.onDelete(kfg, { path: key, ...options });
+			}
+			throw new Error("Driver does not implement onDelete");
+		};
 
-		return driver;
-	};
+		if (this.async) {
+			return (
+				this.request(kfg, { path: key, ...options }) as Promise<void>
+			).then(run) as any;
+		}
+		this.request(kfg, { path: key, ...options });
+		return run() as any;
+	}
+
+	public saveTo(kfg: any, data?: any): inPromise<Async, void> {
+		const run = () => {
+			if (this.save) {
+				return this.save(kfg, data);
+			}
+			// save is optional
+		};
+		if (this.async) {
+			return (this.request(kfg, { data }) as Promise<void>).then(run) as any;
+		}
+		this.request(kfg, { data });
+		return run() as any;
+	}
+
+	public insert(kfg: any, path: string, partial: any): inPromise<Async, void> {
+		const run = (target: any) => {
+			if (typeof target !== "object" || target === null) {
+				throw new Error(`Cannot insert into non-object at path: ${path}`);
+			}
+			Object.assign(target, partial);
+			return this.set(kfg, path, target);
+		};
+
+		const result = this.get(kfg, path);
+		if (this.async) {
+			return (result as Promise<any>).then(run) as any;
+		}
+		return run(result) as any;
+	}
+
+	public inject(kfg: any, data: any): inPromise<Async, void> {
+		const run = () => {
+			if (this.onMerge) {
+				return this.onMerge(kfg, { data });
+			}
+			if (this.onInject) {
+				return this.onInject(kfg, { data });
+			}
+			throw new Error("Driver does not implement onMerge/onInject");
+		};
+
+		if (this.async) {
+			return (this.request(kfg, { data }) as Promise<void>).then(run) as any;
+		}
+		this.request(kfg, { data });
+		return run() as any;
+	}
+
+	public toJSON(kfg: any): inPromise<Async, any> {
+		const run = () => {
+			if (this.onToJSON) {
+				return this.onToJSON(kfg);
+			}
+			throw new Error("Driver does not implement onToJSON");
+		};
+		if (this.async) {
+			return (this.request(kfg, {}) as Promise<void>).then(run) as any;
+		}
+		this.request(kfg, {});
+		return run() as any;
+	}
 }
-
-// For compatibility if needed
-export type KfgDriver<_C, _S, _A> = Driver<boolean>;

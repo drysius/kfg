@@ -1,10 +1,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { kfgDriver } from "../kfg-driver";
+import { KfgDriver } from "../kfg-driver";
 import {
 	deepMerge,
+	deleteProperty,
 	flattenObject,
 	getProperty,
+	setProperty,
 	unflattenObject,
 } from "../utils/object";
 import { buildDefaultObject } from "../utils/schema";
@@ -43,99 +45,143 @@ function getFilePath(config: { path?: string }): string {
 	return path.resolve(process.cwd(), config.path || "config.json");
 }
 
+function save(kfg: any, config: any, data?: any) {
+	const currentData = data || kfg.$store.get("data");
+	const comments = kfg.$store.get("comments", {});
+
+	let dataToSave: Record<string, any>;
+	if (config.keyroot) {
+		dataToSave = flattenObject(currentData);
+		for (const path in comments) {
+			dataToSave[`${path}:comment`] = comments[path];
+		}
+	} else {
+		const dataWithComments = JSON.parse(JSON.stringify(currentData));
+		for (const path in comments) {
+			const keys = path.split(".");
+			const propName = keys.pop() as string;
+			const parentPath = keys.join(".");
+			const parentObject = parentPath
+				? getProperty(dataWithComments, parentPath)
+				: dataWithComments;
+			if (typeof parentObject === "object" && parentObject !== null) {
+				parentObject[`${propName}:comment`] = comments[path];
+			}
+		}
+		dataToSave = dataWithComments;
+	}
+
+	const filePath = getFilePath(config);
+	fs.writeFileSync(filePath, JSON.stringify(dataToSave, null, 2));
+}
+
 /**
  * A driver for loading configuration from JSON files.
  */
-export const jsonDriver = kfgDriver<{ path: string; keyroot: boolean }>(
-	(config) => {
-		let comments: Record<string, string> = {};
+export const JsonDriver = new KfgDriver<
+	{ path?: string; keyroot?: boolean },
+	false
+>({
+	identify: "json-driver",
+	async: false,
+	config: {},
+	onMount(kfg) {
+		const cfg = kfg.$config;
+		const defaultData = buildDefaultObject(kfg.schema);
+		const filePath = getFilePath(cfg);
 
-		function save(data: any) {
-			let dataToSave: Record<string, any>;
-			if (config.keyroot) {
-				dataToSave = flattenObject(data);
-				for (const path in comments) {
-					dataToSave[`${path}:comment`] = comments[path];
+		let loadedData: Record<string, any> = {};
+		if (fs.existsSync(filePath)) {
+			try {
+				const fileContent = fs.readFileSync(filePath, "utf-8");
+				if (fileContent) {
+					loadedData = JSON.parse(fileContent);
 				}
-			} else {
-				const dataWithComments = JSON.parse(JSON.stringify(data));
-				for (const path in comments) {
-					const keys = path.split(".");
-					const propName = keys.pop() as string;
-					const parentPath = keys.join(".");
-					const parentObject = parentPath
-						? getProperty(dataWithComments, parentPath)
-						: dataWithComments;
-					if (typeof parentObject === "object" && parentObject !== null) {
-						parentObject[`${propName}:comment`] = comments[path];
-					}
-				}
-				dataToSave = dataWithComments;
+			} catch (_e) {
+				/* Ignore */
 			}
-
-			const filePath = getFilePath(config);
-			fs.writeFileSync(filePath, JSON.stringify(dataToSave, null, 2));
 		}
 
-		return {
-			name: "json-driver",
-			async: false,
-
-			load(schema, opts) {
-				Object.assign(config, opts);
-
-				const defaultData = buildDefaultObject(schema);
-				const filePath = getFilePath(config);
-
-				let loadedData: Record<string, any> = {};
-				if (fs.existsSync(filePath)) {
-					try {
-						const fileContent = fs.readFileSync(filePath, "utf-8");
-						if (fileContent) {
-							loadedData = JSON.parse(fileContent);
-						}
-					} catch (_e) {
-						/* Ignore */
-					}
-				}
-
-				if (config.keyroot) {
-					const flatData = loadedData as Record<string, any>;
-					const cmts: Record<string, string> = {};
-					const data: Record<string, any> = {};
-					for (const key in flatData) {
-						if (key.endsWith(":comment")) {
-							cmts[key.replace(/:comment$/, "")] = flatData[key];
-						} else {
-							data[key] = flatData[key];
-						}
-					}
-					comments = cmts;
-					loadedData = unflattenObject(data);
+		let comments: Record<string, string> = {};
+		if (cfg.keyroot) {
+			const flatData = loadedData as Record<string, any>;
+			const cmts: Record<string, string> = {};
+			const data: Record<string, any> = {};
+			for (const key in flatData) {
+				if (key.endsWith(":comment")) {
+					cmts[key.replace(/:comment$/, "")] = flatData[key];
 				} else {
-					comments = stripComments(loadedData);
+					data[key] = flatData[key];
 				}
+			}
+			comments = cmts;
+			loadedData = unflattenObject(data);
+		} else {
+			comments = stripComments(loadedData);
+		}
 
-				return deepMerge(defaultData, loadedData);
-			},
-
-			set(key, _value, options) {
-				if (!options) options = {};
-				if (key) {
-					if (options?.description) {
-						comments[key] = options.description;
-					}
-				}
-				save(options.data);
-			},
-
-			del(key, options) {
-				if (!options) options = {};
-				if (comments?.[key]) {
-					delete comments[key];
-				}
-				save(options.data);
-			},
-		};
+		kfg.$store.set("comments", comments);
+		const finalData = deepMerge(defaultData, loadedData);
+		kfg.$store.set("data", finalData);
+		return finalData;
 	},
-);
+
+	onGet(kfg, { path }) {
+		const data = kfg.$store.get("data", {});
+		if (!path) return data;
+		return getProperty(data, path);
+	},
+
+	onHas(kfg, { paths }) {
+		const data = kfg.$store.get("data", {});
+		return paths.every((path: string) => getProperty(data, path) !== undefined);
+	},
+
+	onUpdate(kfg, opts) {
+		const data = kfg.$store.get("data", {});
+		if (opts.path) {
+			setProperty(data, opts.path, opts.value);
+		}
+		kfg.$store.set("data", data);
+
+		if (opts?.path && opts?.description) {
+			const comments: Record<string, string> = kfg.$store.get("comments", {});
+			comments[opts.path] = opts.description;
+			kfg.$store.set("comments", comments);
+		}
+		save(kfg, kfg.$config, data);
+	},
+
+	onDelete(kfg, opts) {
+		const data = kfg.$store.get("data", {});
+		if (opts.path) {
+			deleteProperty(data, opts.path);
+		}
+		kfg.$store.set("data", data);
+
+		if (opts?.path) {
+			const comments: Record<string, string> = kfg.$store.get("comments", {});
+			if (comments[opts.path]) {
+				delete comments[opts.path];
+				kfg.$store.set("comments", comments);
+			}
+		}
+		save(kfg, kfg.$config, data);
+	},
+
+	onToJSON(kfg) {
+		return kfg.$store.get("data");
+	},
+
+	onInject(kfg, { data }) {
+		kfg.$store.merge("data", data);
+	},
+
+	onMerge(kfg, { data }) {
+		kfg.$store.merge("data", data);
+	},
+
+	save(kfg, data) {
+		save(kfg, kfg.$config, data);
+	},
+});

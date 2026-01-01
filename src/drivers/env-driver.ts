@@ -1,9 +1,14 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { kfgDriver } from "../kfg-driver";
+import { KfgDriver } from "../kfg-driver";
 import type { SchemaDefinition, TSchema } from "../types";
 import { parse, removeEnvKey, updateEnvContent } from "../utils/env";
-import { deepMerge } from "../utils/object";
+import {
+	deepMerge,
+	deleteProperty,
+	getProperty,
+	setProperty,
+} from "../utils/object";
 import { buildDefaultObject } from "../utils/schema";
 
 function getFilePath(config: { path?: string }): string {
@@ -74,57 +79,93 @@ function traverseSchema(
 /**
  * A driver for loading configuration from environment variables and .env files.
  */
-export const envDriver = kfgDriver<{ path: string }>((config) => {
-	return {
-		name: "env-driver",
-		async: false,
+export const EnvDriver = new KfgDriver<{ path?: string }, false>({
+	identify: "env-driver",
+	async: false,
+	config: {},
+	onMount(kfg, _opts) {
+		const cfg = kfg.$config;
+		const filePath = getFilePath(cfg);
+		const fileContent = fs.existsSync(filePath)
+			? fs.readFileSync(filePath, "utf-8")
+			: "";
+		const envFileValues = parse(fileContent);
 
-		load(schema, opts) {
-			Object.assign(config, opts);
+		const processEnv = Object.fromEntries(
+			Object.entries(process.env).filter(([, v]) => v !== undefined),
+		) as Record<string, string>;
 
-			const filePath = getFilePath(config);
-			const fileContent = fs.existsSync(filePath)
-				? fs.readFileSync(filePath, "utf-8")
-				: "";
-			const envFileValues = parse(fileContent);
+		const allEnvValues = { ...processEnv, ...envFileValues };
 
-			const processEnv = Object.fromEntries(
-				Object.entries(process.env).filter(([, v]) => v !== undefined),
-			) as Record<string, string>;
+		const envData = traverseSchema(kfg.schema, allEnvValues);
+		const defaultData = buildDefaultObject(kfg.schema);
 
-			const allEnvValues = { ...processEnv, ...envFileValues };
+		const finalData = deepMerge(defaultData, envData);
+		kfg.$store.set("data", finalData);
+		return finalData;
+	},
 
-			const envData = traverseSchema(schema, allEnvValues);
-			const defaultData = buildDefaultObject(schema);
+	onGet(kfg, { path }) {
+		const data = kfg.$store.get("data", {});
+		if (!path) return data;
+		return getProperty(data, path);
+	},
 
-			return deepMerge(defaultData, envData);
-		},
+	onHas(kfg, { paths }) {
+		const data = kfg.$store.get("data", {});
+		return paths.every((path: string) => getProperty(data, path) !== undefined);
+	},
 
-		set(key, value, options) {
-			const envKey = key.replace(/\./g, "_").toUpperCase();
+	onUpdate(kfg, opts) {
+		const data = kfg.$store.get("data", {});
+		if (opts.path) {
+			setProperty(data, opts.path, opts.value);
+		}
+		kfg.$store.set("data", data);
 
-			const filePath = getFilePath(config);
-			const currentContent = fs.existsSync(filePath)
-				? fs.readFileSync(filePath, "utf-8")
-				: "";
-			const newContent = updateEnvContent(
-				currentContent,
-				envKey,
-				value,
-				options?.description,
-			);
-			fs.writeFileSync(filePath, newContent);
-		},
+		if (!opts?.path) return;
+		const envKey = opts.path.replace(/\./g, "_").toUpperCase();
 
-		del(key) {
-			const envKey = key.replace(/\./g, "_").toUpperCase();
-			const filePath = getFilePath(config);
-			if (!fs.existsSync(filePath)) {
-				return;
-			}
-			const currentContent = fs.readFileSync(filePath, "utf-8");
-			const newContent = removeEnvKey(currentContent, envKey);
-			fs.writeFileSync(filePath, newContent);
-		},
-	};
+		const filePath = getFilePath(kfg.$config);
+		const currentContent = fs.existsSync(filePath)
+			? fs.readFileSync(filePath, "utf-8")
+			: "";
+		const newContent = updateEnvContent(
+			currentContent,
+			envKey,
+			opts.value,
+			opts.description,
+		);
+		fs.writeFileSync(filePath, newContent);
+	},
+
+	onDelete(kfg, opts) {
+		const data = kfg.$store.get("data", {});
+		if (opts.path) {
+			deleteProperty(data, opts.path);
+		}
+		kfg.$store.set("data", data);
+
+		if (!opts?.path) return;
+		const envKey = opts.path.replace(/\./g, "_").toUpperCase();
+		const filePath = getFilePath(kfg.$config);
+		if (!fs.existsSync(filePath)) {
+			return;
+		}
+		const currentContent = fs.readFileSync(filePath, "utf-8");
+		const newContent = removeEnvKey(currentContent, envKey);
+		fs.writeFileSync(filePath, newContent);
+	},
+
+	onToJSON(kfg) {
+		return kfg.$store.get("data");
+	},
+
+	onInject(kfg, { data }) {
+		kfg.$store.merge("data", data);
+	},
+
+	onMerge(kfg, { data }) {
+		kfg.$store.merge("data", data);
+	},
 });

@@ -1,24 +1,22 @@
-import { kfgDriver } from "../kfg-driver";
-import { flattenObject, unflattenObject } from "../utils/object";
-import { loadSqliteDatabase } from "../utils/sqlite";
-
-const KfgDatabase = await loadSqliteDatabase();
+import { KfgDriver } from "../kfg-driver";
+import {
+	deleteProperty,
+	getProperty,
+	setProperty,
+	unflattenObject,
+} from "../utils/object";
+import KfgDatabase from "../utils/sqlite";
 
 export interface SqliteDriverConfig {
 	path?: string;
 	table?: string;
 	database?: string | any;
-	parents?: any[];
-	parent?: boolean;
-}
-
-interface SqliteDriverExtension {
-    _db: InstanceType<typeof KfgDatabase> | null;
+	logs?: boolean;
 }
 
 function getDb(config: SqliteDriverConfig): InstanceType<typeof KfgDatabase> {
 	if (config.database && typeof config.database.prepare === "function") {
-		return config.database as InstanceType<typeof KfgDatabase>;
+		return config.database;
 	}
 	return new KfgDatabase(config.database || config.path || "config.db");
 }
@@ -51,198 +49,208 @@ function rowToValue(row: any) {
 	return val;
 }
 
-export const sqliteDriver = kfgDriver<SqliteDriverConfig, SqliteDriverExtension>((config) => {
-	return {
-		name: "sqlite-driver",
-		async: false,
-		model: true,
-		_db: null as InstanceType<typeof KfgDatabase> | null,
+function loadData(kfg: any) {
+	const db = kfg.$store.get("db");
+	const table = kfg.$config?.table || "settings";
+	const rows = db.prepare(`SELECT * FROM "${table}"`).all() as any[];
+	const flat: Record<string, any> = {};
+	for (const row of rows) {
+		const fullPath = row.group ? `${row.group}.${row.key}` : row.key;
+		flat[fullPath] = rowToValue(row);
+	}
+	const finalData = unflattenObject(flat);
+	kfg.$store.set("data", finalData);
+	return finalData;
+}
 
-		load(schema, opts) {
-			Object.assign(config, opts);
-			const db = getDb(config);
-			this._db = db;
+function touch(kfg: any) {
+	kfg.$store.set("lastAccess", Date.now());
+}
 
-			const table = config.table || "settings";
-			ensureTable(db, table);
+function log(kfg: any, message: string, ...args: any[]) {
+	if (kfg.$config?.logs) {
+		console.log(`[SqliteDriver] ${message}`, ...args);
+	}
+}
 
-			if (config.parents) {
-				for (const parent of config.parents) {
-					if (parent?.driver) {
-						parent.load({ database: db });
-					} else if (parent && typeof parent.load === "function") {
-						parent.load(schema, { database: db });
-					}
+export const SqliteDriver = new KfgDriver<SqliteDriverConfig, false>({
+	identify: "sqlite-driver",
+	async: false,
+	config: {
+		logs: false,
+	},
+	onMount(kfg, _opts) {
+		const cfg = kfg.$config;
+		const db = getDb(cfg);
+		kfg.$store.set("db", db);
+		kfg.$store.set("queue", []);
+		touch(kfg);
+
+		const table = cfg.table || "settings";
+		ensureTable(db, table);
+
+		// Cache expiration logic
+		const interval = setInterval(() => {
+			const lastAccess = kfg.$store.get("lastAccess", 0);
+			if (Date.now() - lastAccess > 5000) {
+				const data = kfg.$store.get("data");
+				if (data) {
+					log(kfg, "Clearing cache due to inactivity");
+					kfg.$store.set("data", undefined);
 				}
 			}
+		}, 1000); // Check every second
+		kfg.$store.set("interval", interval);
 
-			const rows = db.prepare(`SELECT * FROM "${table}"`).all() as any[];
-			const flat: Record<string, any> = {};
-			for (const row of rows) {
-				const fullPath = row.group ? `${row.group}.${row.key}` : row.key;
-				flat[fullPath] = rowToValue(row);
-			}
-			return unflattenObject(flat);
-		},
+		return loadData(kfg);
+	},
 
-		set(key, value) {
-			const db = this._db;
-			if (!db) return;
-			const table = config.table || "settings";
-			const parts = key.split(".");
-			const k = parts.pop()!;
-			const g = parts.join(".");
-			const type = Array.isArray(value) ? "array" : typeof value;
-			const valStr =
-				type === "object" || type === "array"
-					? JSON.stringify(value)
-					: String(value);
-			const now = Date.now();
+	onUnmount(kfg) {
+		const interval = kfg.$store.get<number>("interval");
+		if (interval) clearInterval(interval);
+		const db = kfg.$store.get<InstanceType<typeof KfgDatabase>>("db");
+		if (db?.close) db.close();
+	},
 
-			db.prepare(
-				`INSERT INTO "${table}" (key, "group", type, value, create_at, update_at)
-                 VALUES (?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(key, "group") DO UPDATE SET
-                    value = excluded.value,
-                    type = excluded.type,
-                    update_at = excluded.update_at`,
-			).run(k, g, type, valStr, now, now);
-		},
+	onGet(kfg, { path }) {
+		touch(kfg);
+		let data = kfg.$store.get<Record<string, any>>("data");
+		if (!data) {
+			log(kfg, "Cache miss, reloading data");
+			data = loadData(kfg);
+		}
+		if (!path) return data;
+		return getProperty(data, path);
+	},
 
-		del(key) {
-			const db = this._db;
-			if (!db) return;
-			const table = config.table || "settings";
-			const parts = key.split(".");
-			const k = parts.pop()!;
-			const g = parts.join(".");
-			db.prepare(`DELETE FROM "${table}" WHERE key = ? AND "group" = ?`).run(
-				k,
-				g,
-			);
-		},
+	onHas(kfg, { paths }) {
+		touch(kfg);
+		let data = kfg.$store.get<Record<string, any>>("data");
+		if (!data) {
+			log(kfg, "Cache miss, reloading data");
+			data = loadData(kfg);
+		}
+		return paths.every((path: string) => getProperty(data, path) !== undefined);
+	},
 
-		find(_schema, opts) {
-			const db = this._db || getDb(config);
-			const table = opts.model;
-			ensureTable(db, table);
+	onUpdate(kfg, opts) {
+		touch(kfg);
+		let data = kfg.$store.get<Record<string, any>>("data");
+		if (!data) {
+			data = loadData(kfg);
+		}
+		if (opts.path) {
+			setProperty(data, opts.path, opts.value);
+		}
+		kfg.$store.set("data", data);
 
-			const queryKeys = Object.keys(opts).filter(
-				(k) => k !== "model" && k !== "relations",
-			);
-			let ids: string[] = [];
+		const db = kfg.$store.get<InstanceType<typeof KfgDatabase>>("db");
+		if (!db || !opts.path) return;
+		const table = kfg.$config?.table || "settings";
+		const parts = opts.path.split(".");
+		const k = parts.pop()!;
+		const g = parts.join(".");
+		const value = opts.value;
+		const type = Array.isArray(value) ? "array" : typeof value;
+		const valStr =
+			type === "object" || type === "array"
+				? JSON.stringify(value)
+				: String(value);
+		const now = Date.now();
 
-			if (queryKeys.length === 0) {
-				const rows = db
-					.prepare(`SELECT DISTINCT "group" FROM "${table}"`)
-					.all() as any[];
-				ids = rows.map((r: any) => r.group.split(".")[0]).filter(Boolean);
-			} else {
-				const subQueries = queryKeys.map((k) => {
-					const val = String(opts[k]);
-					return `SELECT DISTINCT SUBSTR("group" || '.', 1, INSTR("group" || '.', '.') - 1) as id FROM "${table}" WHERE key = '${k}' AND value = '${val}'`;
-				});
-				const rows = db.prepare(subQueries.join(" INTERSECT ")).all() as any[];
-				ids = rows.map((r: any) => r.id);
-			}
-
-			if (ids.length === 0) return null;
-
-			const id = ids[0];
-			const rows = db
-				.prepare(`SELECT * FROM "${table}" WHERE "group" = ? OR "group" LIKE ?`)
-				.all(id, `${id}.%`) as any[];
-
-			const flat: Record<string, any> = {};
-			for (const row of rows) {
-				let g = row.group;
-				if (g === id) g = "";
-				else if (g.startsWith(`${id}.`)) g = g.slice(id.length + 1);
-
-				const fullPath = g ? `${g}.${row.key}` : row.key;
-				flat[fullPath] = rowToValue(row);
-			}
-			const data = unflattenObject(flat);
-			data.id = id;
-			return data;
-		},
-
-		findBy(schema, opts) {
-			// @ts-ignore
-			return this.find(schema, opts);
-		},
-
-		create(_schema, data) {
-			const db = this._db || getDb(config);
-			const table = (data as any)._model;
-			ensureTable(db, table);
-
-			const id = data.id || Math.random().toString(36).substring(2, 11);
-			const flat = flattenObject(data);
-			const now = Date.now();
-
-			for (const key in flat) {
-				if (key === "_model") continue;
-				const parts = key.split(".");
-				const k = parts.pop()!;
-				const g = [id, ...parts].join(".");
-				const value = flat[key];
-				const type = Array.isArray(value) ? "array" : typeof value;
-				const valStr =
-					type === "object" || type === "array"
-						? JSON.stringify(value)
-						: String(value);
-
-				db.prepare(
-					`INSERT INTO "${table}" (key, "group", type, value, create_at, update_at)
-                     VALUES (?, ?, ?, ?, ?, ?)`,
-				).run(k, g, type, valStr, now, now);
-			}
-			data.id = id;
-			return data;
-		},
-
-		update(_schema, id, data) {
-			const db = this._db || getDb(config);
-			const table = (data as any)._model;
-			ensureTable(db, table);
-
-			const flat = flattenObject(data);
-			const now = Date.now();
-
-			for (const key in flat) {
-				if (key === "_model" || key === "id") continue;
-				const parts = key.split(".");
-				const k = parts.pop()!;
-				const g = [id, ...parts].join(".");
-				const value = flat[key];
-				const type = Array.isArray(value) ? "array" : typeof value;
-				const valStr =
-					type === "object" || type === "array"
-						? JSON.stringify(value)
-						: String(value);
-
-				db.prepare(
-					`INSERT INTO "${table}" (key, "group", type, value, create_at, update_at)
-                     VALUES (?, ?, ?, ?, ?, ?)
-                     ON CONFLICT(key, "group") DO UPDATE SET
+		const query = `INSERT INTO "${table}" (key, "group", type, value, create_at, update_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(key, "group") DO UPDATE SET
                         value = excluded.value,
                         type = excluded.type,
-                        update_at = excluded.update_at`,
-				).run(k, g, type, valStr, now, now);
+                        update_at = excluded.update_at`;
+
+		log(kfg, "Queueing update", { key: k, group: g, value: valStr });
+
+		const queue = kfg.$store.get<(() => void)[]>("queue", []);
+		queue.push(() => {
+			if (kfg.$config?.logs) console.log(`[SqliteDriver] Executing: ${query}`);
+			db.prepare(query).run(k, g, type, valStr, now, now);
+		});
+		kfg.$store.set("queue", queue);
+	},
+
+	onDelete(kfg, opts) {
+		touch(kfg);
+		let data = kfg.$store.get<Record<string, any>>("data");
+		if (!data) {
+			data = loadData(kfg);
+		}
+		if (opts.path) {
+			deleteProperty(data, opts.path);
+		}
+		kfg.$store.set("data", data);
+
+		const db = kfg.$store.get<InstanceType<typeof KfgDatabase>>("db");
+		if (!db || !opts.path) return;
+		const table = kfg.$config?.table || "settings";
+		const parts = opts.path.split(".");
+		const k = parts.pop()!;
+		const g = parts.join(".");
+
+		const query = `DELETE FROM "${table}" WHERE key = ? AND "group" = ?`;
+		log(kfg, "Queueing delete", { key: k, group: g });
+
+		const queue = kfg.$store.get<(() => void)[]>("queue", []);
+		queue.push(() => {
+			if (kfg.$config?.logs) console.log(`[SqliteDriver] Executing: ${query}`);
+			db.prepare(query).run(k, g);
+		});
+		kfg.$store.set("queue", queue);
+	},
+
+	onToJSON(kfg) {
+		touch(kfg);
+		let data = kfg.$store.get("data");
+		if (!data) {
+			data = loadData(kfg);
+		}
+		return data;
+	},
+
+	onInject(kfg, { data }) {
+		touch(kfg);
+		// If cache is missing, load it first to ensure merge is correct?
+		// Or just merge into what we have (if undefined, merge creates it)?
+		// kfg.$store.merge handles deepMerge.
+		// If "data" is undefined, deepMerge(undefined, newData) might be tricky or return newData.
+		// Let's ensure data exists.
+		let currentData = kfg.$store.get<Record<string, any>>("data");
+		if (!currentData) {
+			currentData = loadData(kfg);
+		}
+		kfg.$store.merge("data", data);
+	},
+
+	onMerge(kfg, { data }) {
+		touch(kfg);
+		let currentData = kfg.$store.get("data");
+		if (!currentData) {
+			currentData = loadData(kfg);
+		}
+		kfg.$store.merge("data", data);
+	},
+
+	save(kfg) {
+		touch(kfg);
+		const db = kfg.$store.get<InstanceType<typeof KfgDatabase>>("db");
+		const queue = kfg.$store.get<(() => void)[]>("queue", []);
+		if (!db || queue.length === 0) return;
+
+		log(kfg, `Saving ${queue.length} changes`);
+
+		const transaction = db.transaction(() => {
+			for (const query of queue) {
+				query();
 			}
-			return data;
-		},
+		});
 
-		delete(_schema, id, opts?: any) {
-			const db = this._db || getDb(config);
-			const table = opts?.model;
-			if (!table) throw new Error("Model name not provided for delete");
-			ensureTable(db, table);
-
-			db.prepare(
-				`DELETE FROM "${table}" WHERE "group" = ? OR "group" LIKE ?`,
-			).run(id, `${id}.%`);
-		},
-	};
+		transaction();
+		kfg.$store.set("queue", []);
+	},
 });

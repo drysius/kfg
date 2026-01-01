@@ -1,12 +1,13 @@
 import type {
 	SchemaOptions,
 	Static,
+	TAny,
 	TObject,
 	TSchema,
 } from "@sinclair/typebox";
+import type { Kfg } from "./kfg";
+import type { KfgDriver } from "./kfg-driver";
 export type { TSchema, TObject, SchemaOptions };
-
-import type { Model } from "./model";
 
 // --- Driver Related Types ---
 
@@ -70,44 +71,58 @@ export type inPromise<Async extends boolean, Result> = Async extends true
 export type DriverConfig = Record<any, any>;
 
 /**
- * The interface for a Functional Driver instance.
- * @template A Async flag
+ * The interface for a Driver definition.
  */
-export interface Driver<A extends boolean> {
-	name: string;
-	async: A;
-	model?: boolean;
-
-	load(schema: SchemaDefinition, opts?: any): inPromise<A, any>;
-	get(key?: string): inPromise<A, any>;
-	set(
-		key: string,
-		value: any,
-		options?: { description?: string; data?: any },
-	): inPromise<A, void>;
-	has(...keys: string[]): inPromise<A, boolean>;
-	del(key: string, options?: { data?: any }): inPromise<A, void>;
-	inject(data: any): inPromise<A, void>;
-
-	/** Called before operations like get, set, del, etc. */
-	onRequest?(): inPromise<A, void>;
-	/** Called when the driver is no longer needed or updated. */
-	unmount?(): void;
-
-	// Optional Model methods
-	find?(schema: SchemaDefinition, opts: any): any;
-	findBy?(schema: SchemaDefinition, opts: any): any;
-	create?(schema: SchemaDefinition, data: any): any;
-	update?(schema: SchemaDefinition, id: any, data: any): any;
-	delete?(schema: SchemaDefinition, id: any): any;
+export interface Driver<
+	AsyncDriver extends boolean,
+	Config extends DriverConfig = {},
+> {
+	identify: string;
+	async: AsyncDriver;
+	config?: Partial<Config>;
+	onMount?: (
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		opts?: any,
+	) => inPromise<AsyncDriver, any>;
+	onUnmount?: (
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+	) => void;
+	onRequest?: (
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		opts: any,
+	) => inPromise<AsyncDriver, void>;
+	onGet?: (
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		opts: any,
+	) => inPromise<AsyncDriver, any>;
+	onUpdate?: (
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		opts: any,
+	) => inPromise<AsyncDriver, void>;
+	onDelete?: (
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		opts: any,
+	) => inPromise<AsyncDriver, void>;
+	onMerge?: (
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		opts: any,
+	) => inPromise<AsyncDriver, void>;
+	onHas?: (
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		opts: any,
+	) => inPromise<AsyncDriver, boolean>;
+	onInject?: (
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		opts: any,
+	) => inPromise<AsyncDriver, void>;
+	onToJSON?: (
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+	) => inPromise<AsyncDriver, any>;
+	save?: (
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		data?: any,
+	) => inPromise<AsyncDriver, void>;
 }
-
-/**
- * Factory function type to create a driver.
- */
-export type DriverFactory<C extends DriverConfig, A extends boolean> = (
-	config: Partial<C>,
-) => Driver<A>;
 
 // --- Schema Related Types ---
 
@@ -145,6 +160,5 @@ export interface CustomOptions<Default = any> {
 	initial_save?: boolean;
 	prop?: string;
 	refines?: ((value: unknown) => boolean | string)[];
-	model?: Model<any>;
 	createms?: boolean;
 }
