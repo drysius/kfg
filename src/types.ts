@@ -57,6 +57,15 @@ export type DeepGet<T, P extends string> = P extends `${infer K}.${infer R}`
 		: never;
 
 /**
+ * Gets the type of a value at a given path in an object (ignoring the first segment).
+ * @template T The type of the object.
+ * @template P The path to the value.
+ */
+export type MultiDeepGet<T, P extends string> = P extends `${string}.${infer R}`
+	? DeepGet<T, R>
+	: T;
+
+/**
  * Represents a value that can be a promise or a plain value.
  * @template Async The type of the async flag.
  * @template Result The type of the result.
@@ -81,48 +90,79 @@ export interface Driver<
 	async: AsyncDriver;
 	config?: Partial<Config>;
 	onMount?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
 		opts?: any,
 	) => inPromise<AsyncDriver, any>;
 	onUnmount?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
 	) => void;
 	onRequest?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
 		opts: any,
 	) => inPromise<AsyncDriver, void>;
 	onGet?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
 		opts: any,
 	) => inPromise<AsyncDriver, any>;
 	onUpdate?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
 		opts: any,
 	) => inPromise<AsyncDriver, void>;
 	onDelete?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
 		opts: any,
 	) => inPromise<AsyncDriver, void>;
 	onMerge?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
 		opts: any,
 	) => inPromise<AsyncDriver, void>;
 	onHas?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
 		opts: any,
 	) => inPromise<AsyncDriver, boolean>;
 	onInject?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
 		opts: any,
 	) => inPromise<AsyncDriver, void>;
 	onToJSON?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
 	) => inPromise<AsyncDriver, any>;
 	save?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>>,
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
 		data?: any,
 	) => inPromise<AsyncDriver, void>;
+	onCreate?: (
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
+		opts: { data: any },
+	) => inPromise<AsyncDriver, any>;
+	onList?: (
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
+		opts?: any,
+	) => inPromise<AsyncDriver, any>;
+	onSize?: (
+		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
+	) => number;
 }
+
+/**
+ * Definição dos eventos e seus argumentos (Tuplas)
+ */
+export type KfgHooks<S extends SchemaDefinition> = {
+	create: [data: StaticSchema<S>];
+	update: [newdata: StaticSchema<S>, olddata: StaticSchema<S>];
+	delete: [data: StaticSchema<S>];
+	ready: [];
+};
+
+/**
+ * Helper para extrair a assinatura da função baseada no nome do evento
+ */
+export type KfgHookCallback<
+	S extends SchemaDefinition,
+	E extends keyof KfgHooks<S>,
+> = (...args: KfgHooks<S>[E]) => any | Promise<any>;
+
+export type HookName = keyof KfgHooks<{}>;
 
 // --- Schema Related Types ---
 

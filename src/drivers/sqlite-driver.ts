@@ -1,6 +1,8 @@
+import { Kfg } from "../kfg";
 import { KfgDriver } from "../kfg-driver";
 import {
 	deleteProperty,
+	flattenObject,
 	getProperty,
 	setProperty,
 	unflattenObject,
@@ -52,7 +54,9 @@ function rowToValue(row: any) {
 function loadData(kfg: any) {
 	const db = kfg.$store.get("db");
 	const table = kfg.$config?.table || "settings";
-	const rows = db.prepare(`SELECT * FROM "${table}"`).all() as any[];
+	const stmt = db.prepare(`SELECT * FROM "${table}"`);
+	const rows = stmt.all() as any[];
+	stmt.finalize();
 	const flat: Record<string, any> = {};
 	for (const row of rows) {
 		const fullPath = row.group ? `${row.group}.${row.key}` : row.key;
@@ -72,6 +76,21 @@ function log(kfg: any, message: string, ...args: any[]) {
 		console.log(`[SqliteDriver] ${message}`, ...args);
 	}
 }
+
+function queueQuery(kfg: Kfg<any,any,any>, query: string, ...params: any[]) {
+	const db = kfg.$store.get<InstanceType<typeof KfgDatabase>>("db");
+	if (!db) return;
+	const queue = kfg.$store.get<(() => void)[]>("queue", []);
+	queue.push(() => {
+		if (kfg.$config?.logs) console.log(`[SqliteDriver] Executing: ${query}`);
+		const stmt = db.prepare(query);
+		stmt.run(...params);
+		stmt.finalize();
+	});
+	kfg.$store.set("queue", queue);
+}
+
+// --- Driver Implementation ---
 
 export const SqliteDriver = new KfgDriver<SqliteDriverConfig, false>({
 	identify: "sqlite-driver",
@@ -106,6 +125,7 @@ export const SqliteDriver = new KfgDriver<SqliteDriverConfig, false>({
 	},
 
 	onUnmount(kfg) {
+		this.save?.(kfg as never);
 		const interval = kfg.$store.get<number>("interval");
 		if (interval) clearInterval(interval);
 		const db = kfg.$store.get<InstanceType<typeof KfgDatabase>>("db");
@@ -144,9 +164,86 @@ export const SqliteDriver = new KfgDriver<SqliteDriverConfig, false>({
 		}
 		kfg.$store.set("data", data);
 
-		const db = kfg.$store.get<InstanceType<typeof KfgDatabase>>("db");
-		if (!db || !opts.path) return;
 		const table = kfg.$config?.table || "settings";
+
+		if (kfg.multimode) {
+			const parts = opts.path.split(".");
+			const id = parts[0];
+
+			// If updating an item (root object in multimode)
+			if (parts.length === 1) {
+				const value = opts.value;
+				const flat = flattenObject(value);
+				for (const key in flat) {
+					const val = flat[key];
+					const type = Array.isArray(val) ? "array" : typeof val;
+					const valStr =
+						type === "object" || type === "array"
+							? JSON.stringify(val)
+							: String(val);
+					const now = Date.now();
+
+					const query = `INSERT INTO "${table}" (key, "group", type, value, create_at, update_at)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(key, "group") DO UPDATE SET
+                            value = excluded.value,
+                            type = excluded.type,
+                            update_at = excluded.update_at`;
+					queueQuery(kfg, query, key, id, type, valStr, now, now);
+				}
+				return;
+			} else {
+				// Partial update
+				const subKey = parts.slice(1).join(".");
+				const value = opts.value;
+				const flat = flattenObject(value); // keys are relative to value
+
+				if (
+					typeof value !== "object" ||
+					value === null ||
+					Array.isArray(value)
+				) {
+					const key = subKey;
+					const val = value;
+					const type = Array.isArray(val) ? "array" : typeof val;
+					const valStr =
+						type === "object" || type === "array"
+							? JSON.stringify(val)
+							: String(val);
+					const now = Date.now();
+
+					const query = `INSERT INTO "${table}" (key, "group", type, value, create_at, update_at)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(key, "group") DO UPDATE SET
+                            value = excluded.value,
+                            type = excluded.type,
+                            update_at = excluded.update_at`;
+					queueQuery(kfg, query, key, id, type, valStr, now, now);
+				} else {
+					// Object
+					for (const k in flat) {
+						const combinedKey = subKey + (k ? `.${k}` : "");
+						const val = flat[k];
+						const type = Array.isArray(val) ? "array" : typeof val;
+						const valStr =
+							type === "object" || type === "array"
+								? JSON.stringify(val)
+								: String(val);
+						const now = Date.now();
+
+						const query = `INSERT INTO "${table}" (key, "group", type, value, create_at, update_at)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                            ON CONFLICT(key, "group") DO UPDATE SET
+                                value = excluded.value,
+                                type = excluded.type,
+                                update_at = excluded.update_at`;
+						queueQuery(kfg, query, combinedKey, id, type, valStr, now, now);
+					}
+				}
+				return;
+			}
+		}
+
 		const parts = opts.path.split(".");
 		const k = parts.pop()!;
 		const g = parts.join(".");
@@ -166,13 +263,7 @@ export const SqliteDriver = new KfgDriver<SqliteDriverConfig, false>({
                         update_at = excluded.update_at`;
 
 		log(kfg, "Queueing update", { key: k, group: g, value: valStr });
-
-		const queue = kfg.$store.get<(() => void)[]>("queue", []);
-		queue.push(() => {
-			if (kfg.$config?.logs) console.log(`[SqliteDriver] Executing: ${query}`);
-			db.prepare(query).run(k, g, type, valStr, now, now);
-		});
-		kfg.$store.set("queue", queue);
+		queueQuery(kfg, query, k, g, type, valStr, now, now);
 	},
 
 	onDelete(kfg, opts) {
@@ -186,22 +277,64 @@ export const SqliteDriver = new KfgDriver<SqliteDriverConfig, false>({
 		}
 		kfg.$store.set("data", data);
 
-		const db = kfg.$store.get<InstanceType<typeof KfgDatabase>>("db");
-		if (!db || !opts.path) return;
 		const table = kfg.$config?.table || "settings";
 		const parts = opts.path.split(".");
+
+		if (kfg.multimode && parts.length === 1) {
+			// Deleting an item
+			const id = parts[0];
+			const query = `DELETE FROM "${table}" WHERE "group" = ?`;
+			log(kfg, "Queueing group delete", { group: id });
+			queueQuery(kfg, query, id);
+			return;
+		}
+
 		const k = parts.pop()!;
 		const g = parts.join(".");
 
 		const query = `DELETE FROM "${table}" WHERE key = ? AND "group" = ?`;
 		log(kfg, "Queueing delete", { key: k, group: g });
+		queueQuery(kfg, query, k, g);
+	},
 
-		const queue = kfg.$store.get<(() => void)[]>("queue", []);
-		queue.push(() => {
-			if (kfg.$config?.logs) console.log(`[SqliteDriver] Executing: ${query}`);
-			db.prepare(query).run(k, g);
-		});
-		kfg.$store.set("queue", queue);
+	onCreate(kfg, { data }) {
+		touch(kfg);
+		// Multimode create
+		const id = data.id;
+		if (!id) throw new Error("Cannot create item without 'id'.");
+
+		let storeData = kfg.$store.get<Record<string, any>>("data");
+		if (!storeData) {
+			storeData = loadData(kfg);
+		}
+		storeData[id] = data;
+		kfg.$store.set("data", storeData);
+
+		const table = kfg.$config?.table || "settings";
+		const flat = flattenObject(data);
+		const now = Date.now();
+
+		for (const key in flat) {
+			const val = flat[key];
+			const type = Array.isArray(val) ? "array" : typeof val;
+			const valStr =
+				type === "object" || type === "array"
+					? JSON.stringify(val)
+					: String(val);
+
+			const query = `INSERT INTO "${table}" (key, "group", type, value, create_at, update_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(key, "group") DO UPDATE SET
+                    value = excluded.value,
+                    type = excluded.type,
+                    update_at = excluded.update_at`;
+			queueQuery(kfg, query, key, id, type, valStr, now, now);
+		}
+
+		// Let's stick to queue.
+		// Update: We want persistence immediately for consistency.
+		kfg.save();
+		return data;
 	},
 
 	onToJSON(kfg) {
@@ -215,11 +348,6 @@ export const SqliteDriver = new KfgDriver<SqliteDriverConfig, false>({
 
 	onInject(kfg, { data }) {
 		touch(kfg);
-		// If cache is missing, load it first to ensure merge is correct?
-		// Or just merge into what we have (if undefined, merge creates it)?
-		// kfg.$store.merge handles deepMerge.
-		// If "data" is undefined, deepMerge(undefined, newData) might be tricky or return newData.
-		// Let's ensure data exists.
 		let currentData = kfg.$store.get<Record<string, any>>("data");
 		if (!currentData) {
 			currentData = loadData(kfg);
@@ -253,4 +381,58 @@ export const SqliteDriver = new KfgDriver<SqliteDriverConfig, false>({
 		transaction();
 		kfg.$store.set("queue", []);
 	},
+
+	onSize(kfg) {
+		touch(kfg);
+		const data = kfg.$store.get("data");
+		if (!data) return 0;
+		if (kfg.multimode) return Object.keys(data).length;
+		return 1;
+	},
 });
+
+export const AsyncSqliteDriver = new KfgDriver<SqliteDriverConfig, true>({
+	identify: "async-sqlite-driver",
+	async: true,
+	config: { logs: false },
+	onMount(kfg, opts) {
+		return Promise.resolve(SqliteDriver.mount(kfg, opts));
+	},
+	onUnmount(kfg) {
+		SqliteDriver.unmount?.(kfg);
+	},
+	onGet(kfg, opts) {
+		return Promise.resolve(SqliteDriver.get(kfg, opts.path));
+	},
+	onHas(kfg, opts) {
+		return Promise.resolve(SqliteDriver.has(kfg, ...opts.paths));
+	},
+	onUpdate(kfg, opts) {
+		return Promise.resolve(SqliteDriver.definition.onUpdate!(kfg as never, opts));
+	},
+	onDelete(kfg, opts) {
+		return Promise.resolve(SqliteDriver.definition.onDelete!(kfg as never, opts));
+	},
+	onCreate(kfg, opts) {
+		return Promise.resolve(SqliteDriver.definition.onCreate!(kfg as never, opts));
+	},
+	save(kfg, data) {
+		return Promise.resolve(SqliteDriver.save!(kfg as never, data));
+	},
+	onToJSON(kfg) {
+		return Promise.resolve(SqliteDriver.toJSON(kfg));
+	},
+	onInject(kfg, opts) {
+		return Promise.resolve(SqliteDriver.inject(kfg, opts.data));
+	},
+	onMerge(kfg, opts) {
+		return Promise.resolve(SqliteDriver.definition.onMerge!(kfg as never, opts));
+	},
+	onSize(kfg) {
+		return SqliteDriver.definition.onSize!(kfg as never);
+	},
+});
+// Fix AsyncSqliteDriver onMerge to call onMerge
+AsyncSqliteDriver.definition.onMerge = (kfg, opts) => {
+	return Promise.resolve(SqliteDriver.definition.onMerge!(kfg as never, opts));
+};

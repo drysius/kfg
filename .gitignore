@@ -13,12 +13,14 @@ test.ts
 # code coverage
 coverage
 *.lcov
-
+llms.txt
+test_multimode.db
 resources
 # logs
 logs
 _.log
 report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+data
 
 # dotenv environment variable files
 .env

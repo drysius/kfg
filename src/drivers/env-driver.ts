@@ -168,4 +168,9 @@ export const EnvDriver = new KfgDriver<{ path?: string }, false>({
 	onMerge(kfg, { data }) {
 		kfg.$store.merge("data", data);
 	},
+
+	onSize(kfg) {
+		const data = kfg.$store.get("data");
+		return data ? 1 : 0;
+	},
 });

@@ -24,6 +24,9 @@ export class KfgDriver<C extends DriverConfig, Async extends boolean>
 	public onInject?: Driver<Async, C>["onInject"];
 	public onToJSON?: Driver<Async, C>["onToJSON"];
 	public save?: Driver<Async, C>["save"];
+	public onCreate?: Driver<Async, C>["onCreate"];
+	public onList?: Driver<Async, C>["onList"];
+	public onSize?: Driver<Async, C>["onSize"];
 
 	/**
 	 * Creates a new instance of KfgDriver.
@@ -45,6 +48,9 @@ export class KfgDriver<C extends DriverConfig, Async extends boolean>
 		this.onInject = definition.onInject;
 		this.onToJSON = definition.onToJSON;
 		this.save = definition.save;
+		this.onCreate = definition.onCreate;
+		this.onList = definition.onList;
+		this.onSize = definition.onSize;
 	}
 
 	/**
@@ -212,5 +218,43 @@ export class KfgDriver<C extends DriverConfig, Async extends boolean>
 		}
 		this.request(kfg, {});
 		return run() as any;
+	}
+
+	public create(kfg: any, data: any): inPromise<Async, any> {
+		const run = () => {
+			if (this.onCreate) {
+				return this.onCreate(kfg, { data });
+			}
+			throw new Error("Driver does not implement onCreate");
+		};
+		if (this.async) {
+			return (this.request(kfg, { data }) as Promise<void>).then(run) as any;
+		}
+		this.request(kfg, { data });
+		return run() as any;
+	}
+
+	public list(kfg: any, opts?: any): inPromise<Async, any> {
+		const run = () => {
+			if (this.onList) {
+				return this.onList(kfg, opts);
+			}
+			throw new Error("Driver does not implement onList");
+		};
+		if (this.async) {
+			return (this.request(kfg, opts) as Promise<void>).then(run) as any;
+		}
+		this.request(kfg, opts);
+		return run() as any;
+	}
+
+	public size(kfg: any): number {
+		if (this.onSize) {
+			return this.onSize(kfg);
+		}
+		// Default implementation if onSize not provided?
+		// We can try to get data and count keys if in store?
+		// But explicit is better.
+		return 0;
 	}
 }

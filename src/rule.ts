@@ -50,28 +50,27 @@ type IsEnum<TRules extends string> = [AfterIn<TRules>] extends [never]
 	? false
 	: true;
 
-type IsOptional<TRules extends string> = HasToken<
-	TRules,
-	"optional"
-> extends true
-	? true
-	: HasToken<TRules, "nullable"> extends true
+type IsOptional<TRules extends string> =
+	HasToken<TRules, "optional"> extends true
 		? true
-		: false;
+		: HasToken<TRules, "nullable"> extends true
+			? true
+			: false;
 
-type BaseSchema<TRules extends string> = IsEnum<TRules> extends true
-	? TUnion<TLiteral<SplitComma<InValues<TRules>>>[]>
-	: HasToken<TRules, "boolean"> extends true
-		? TBoolean
-		: HasToken<TRules, "integer"> extends true
-			? TInteger
-			: HasToken<TRules, "int"> extends true
+type BaseSchema<TRules extends string> =
+	IsEnum<TRules> extends true
+		? TUnion<TLiteral<SplitComma<InValues<TRules>>>[]>
+		: HasToken<TRules, "boolean"> extends true
+			? TBoolean
+			: HasToken<TRules, "integer"> extends true
 				? TInteger
-				: HasToken<TRules, "number"> extends true
-					? TNumber
-					: HasToken<TRules, "numeric"> extends true
+				: HasToken<TRules, "int"> extends true
+					? TInteger
+					: HasToken<TRules, "number"> extends true
 						? TNumber
-						: TString;
+						: HasToken<TRules, "numeric"> extends true
+							? TNumber
+							: TString;
 
 type WithOptional<
 	TRules extends string,
@@ -90,19 +89,20 @@ export type RuleSchemaFor<TRules extends string> = string extends TRules
 	: RuleSchema<TRules>;
 
 /** Tipo do default coerente com as rules (quando literal). */
-export type RuleValue<TRules extends string> = IsEnum<TRules> extends true
-	? SplitComma<InValues<TRules>>
-	: HasToken<TRules, "boolean"> extends true
-		? boolean
-		: HasToken<TRules, "integer"> extends true
-			? number
-			: HasToken<TRules, "int"> extends true
+export type RuleValue<TRules extends string> =
+	IsEnum<TRules> extends true
+		? SplitComma<InValues<TRules>>
+		: HasToken<TRules, "boolean"> extends true
+			? boolean
+			: HasToken<TRules, "integer"> extends true
 				? number
-				: HasToken<TRules, "number"> extends true
+				: HasToken<TRules, "int"> extends true
 					? number
-					: HasToken<TRules, "numeric"> extends true
+					: HasToken<TRules, "number"> extends true
 						? number
-						: string;
+						: HasToken<TRules, "numeric"> extends true
+							? number
+							: string;
 
 export type RuleDefault<TRules extends string> = string extends TRules
 	? unknown
