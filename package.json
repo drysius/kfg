@@ -2,7 +2,7 @@
   "name": "kfg",
   "type": "module",
   "description": "Simple system of standardization of configurations for node js and bun.",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",

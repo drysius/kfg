@@ -82,19 +82,20 @@ export class Kfg<
         }
 
         let schemaToLoad = this["~schema"].defined;
-        let validationSchema = this["~schema"].compiled;
+        let compiled = buildTypeBoxSchema(schemaToLoad);
+        addSmartDefaults(compiled);
 
         if (options?.only_importants) {
             schemaToLoad = makeSchemaOptional(schemaToLoad) as S;
-            const tempSchema = buildTypeBoxSchema(schemaToLoad);
-            addSmartDefaults(tempSchema);
-            validationSchema = tempSchema;
+            compiled = buildTypeBoxSchema(schemaToLoad);
+            addSmartDefaults(compiled);
         }
+        this["~schema"].compiled = compiled;
 
         const result = this["~driver"].load(schemaToLoad);
 
         const process = (rawData: any) => {
-             const cleanData = this.validateAndClean(rawData, validationSchema);
+             const cleanData = this.validateAndClean(rawData, this["~schema"].compiled);
              this["~cache"] = cleanData;
              this["~loaded"] = true;
         };

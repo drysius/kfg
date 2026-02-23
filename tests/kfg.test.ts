@@ -275,6 +275,25 @@ describe('Kfg Core Logic', () => {
         expect(kfg.get('database.url')).toBe('postgres://localhost');
     });
 
+    it('should allow set() after load({ only_importants: true }) without full-schema failure', () => {
+        const driver = new MockDriver({
+            database: { url: 'postgres://localhost' },
+        });
+        const kfg = new Kfg(driver, {
+            database: c.object({
+                url: c.string({ important: true }),
+                timeout: c.number(),
+                username: c.string(),
+                password: c.string(),
+            }),
+            feature: c.string(),
+        });
+
+        kfg.load({ only_importants: true });
+        expect(() => kfg.set('database.url', 'postgres://remote')).not.toThrow();
+        expect(kfg.get('database.url')).toBe('postgres://remote');
+    });
+
     it('should return plain object from toJSON after load()', () => {
         const kfg = new Kfg(new MockDriver({ a: 2 }), { a: c.number() });
         kfg.load();
