@@ -91,9 +91,29 @@ describe('Utils: schema.ts', () => {
             };
             const optionalDefinition = makeSchemaOptional(definition);
             const schema = buildTypeBoxSchema(optionalDefinition);
-            // app is required, but its content (host) is optional. db is required.
-            expect(Value.Check(schema, { db: { port: 123 } })).toBe(false); // missing app
+            // only paths with important fields stay required
+            expect(Value.Check(schema, { db: { port: 123 } })).toBe(true);
             expect(Value.Check(schema, { app: {}, db: { port: 123 } })).toBe(true);
+            expect(Value.Check(schema, {})).toBe(false); // missing required important path
+        });
+
+        it('should keep important fields required inside c.object()', () => {
+            const definition = {
+                database: c.object({
+                    url: c.string({ important: true }),
+                    pool: c.object({
+                        min: c.number(),
+                        max: c.number(),
+                    }),
+                }),
+            };
+
+            const optionalDefinition = makeSchemaOptional(definition);
+            const schema = buildTypeBoxSchema(optionalDefinition);
+
+            expect(Value.Check(schema, {})).toBe(false);
+            expect(Value.Check(schema, { database: {} })).toBe(false);
+            expect(Value.Check(schema, { database: { url: "x" } })).toBe(true);
         });
     });
 });

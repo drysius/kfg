@@ -89,19 +89,73 @@ export function buildDefaultObject(
 export function makeSchemaOptional(
 	definition: SchemaDefinition,
 ): SchemaDefinition {
+	const isSchemaOptional = (schema: TSchema): boolean => {
+		return Value.Check(Type.Object({ temp: schema }), {});
+	};
+
+	const hasImportantRequirement = (node: any): boolean => {
+		if (!node || typeof node !== "object") return false;
+
+		if (node[Symbol.for("TypeBox.Kind")]) {
+			const schemaNode = node as TSchema & { important?: boolean };
+			if (schemaNode.important) return true;
+
+			if (schemaNode.type === "object" && (schemaNode as any).properties) {
+				return Object.values((schemaNode as any).properties).some((child) =>
+					hasImportantRequirement(child),
+				);
+			}
+			return false;
+		}
+
+		return Object.values(node).some((child) => hasImportantRequirement(child));
+	};
+
+	const makeTypeBoxOptional = (schema: TSchema): TSchema => {
+		const schemaAny = schema as any;
+
+		if (schemaAny.type === "object" && schemaAny.properties) {
+			const nextProperties: Record<string, TSchema> = {};
+			for (const propKey of Object.keys(schemaAny.properties)) {
+				nextProperties[propKey] = makeTypeBoxOptional(schemaAny.properties[propKey]);
+			}
+
+			const clone: any = { ...schemaAny, properties: nextProperties };
+			clone.required = Object.keys(nextProperties).filter(
+				(propKey) => !isSchemaOptional(nextProperties[propKey]),
+			);
+			if (clone.required.length === 0) {
+				delete clone.required;
+			}
+
+			const shouldKeepRequired =
+				(clone as { important?: boolean }).important === true ||
+				hasImportantRequirement(clone) ||
+				isSchemaOptional(clone as TSchema);
+
+			return shouldKeepRequired
+				? (clone as TSchema)
+				: Type.Optional(clone as TSchema);
+		}
+
+		const shouldKeepRequired =
+			(schemaAny as { important?: boolean }).important === true ||
+			hasImportantRequirement(schemaAny) ||
+			isSchemaOptional(schema);
+
+		return shouldKeepRequired ? schema : Type.Optional(schema);
+	};
+
 	const newDefinition: Record<string, any> = {};
 	for (const key in definition) {
 		const value = (definition as any)[key];
 		if (value?.[Symbol.for("TypeBox.Kind")]) {
-			const schema = value as TSchema & { important?: boolean };
-			const isOptional = Value.Check(Type.Object({ temp: schema }), {});
-			if (schema.important || isOptional) {
-				newDefinition[key] = schema;
-			} else {
-				newDefinition[key] = Type.Optional(schema);
-			}
+			newDefinition[key] = makeTypeBoxOptional(value as TSchema);
 		} else if (typeof value === "object" && value !== null) {
-			newDefinition[key] = makeSchemaOptional(value);
+			const next = makeSchemaOptional(value);
+			newDefinition[key] = hasImportantRequirement(value)
+				? next
+				: Type.Optional(buildTypeBoxSchema(next as SchemaDefinition));
 		} else {
 			newDefinition[key] = value;
 		}
