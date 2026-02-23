@@ -1,450 +1,284 @@
+import type { SchemaDefinition, StaticSchema, DeepGet, Paths, RootPaths, inPromise } from "./types";
+import { KfgDriver } from "./kfg-driver";
+import { getProperty, setProperty, deleteProperty, deepMerge } from "./utils/object";
+import { buildTypeBoxSchema, addSmartDefaults, makeSchemaOptional } from "./utils/schema";
 import { Value } from "@sinclair/typebox/value";
-import type { KfgDriver } from "./kfg-driver";
-import { KfgStore } from "./store";
-import type {
-	DeepGet,
-	inPromise,
-	KfgHookCallback,
-	KfgHooks,
-	MultiDeepGet,
-	Paths,
-	RootPaths,
-	SchemaDefinition,
-	StaticSchema,
-} from "./types";
-import {
-	addSmartDefaults,
-	buildTypeBoxSchema,
-	makeSchemaOptional,
-} from "./utils/schema";
+import type { TObject } from "@sinclair/typebox";
+import { defaultValidationMessage, notLoadedMessage } from "./errors";
 
-/**
- * The main class for Kfg. It is responsible for loading and managing the configuration.
- * @template D The type of the driver.
- * @template S The type of the schema.
- * @template M Whether multimode is enabled.
- */
 export class Kfg<
-	D extends KfgDriver<any, any>,
-	S extends SchemaDefinition,
-	M extends boolean = false,
+    D extends KfgDriver<any, any>,
+    S extends SchemaDefinition
 > {
-	public driver: D;
-	public schema: S;
-	public $store = new KfgStore();
-	public multimode = false;
-	private loaded = false;
-	private _lastOptions: any;
-	private hooks: {
-		[K in keyof KfgHooks<S>]?: Array<KfgHookCallback<S, K>>;
-	} = {};
+    public readonly "~driver": D;
+    public readonly "~schema": { defined: S, compiled: TObject };
+    private "~lastLoadOptions"?:
+        | (Partial<D["config"]> & { only_importants?: boolean })
+        | undefined;
+    
+    // Internal state
+    public "~cache": Record<string, any> = {};
+    public "~loaded": boolean = false;
 
-	/**
-	 * Creates a new instance of Kfg.
-	 * @param driver The driver instance.
-	 * @param schema The schema to use for validating the configuration.
-	 * @param options Options or multimode flag.
-	 */
-	constructor(driver: D, schema: S, options?: { multiple?: M } | M) {
-		this.driver = driver;
-		this.schema = schema;
-		if (typeof options === "boolean") {
-			this.multimode = options;
-		} else if (options) {
-			this.multimode = (options as any).multiple || false;
-		}
-	}
+    /**
+     * Proxy to access configuration properties directly.
+     * Example: kfg.config.database.port
+     */
+    public readonly config: StaticSchema<S>;
+    public get driver(): D {
+        return this["~driver"];
+    }
 
-	/**
-	 * Returns the driver configuration from the store.
-	 */
-	get $config(): D["config"] {
-		// We access store here for meta-config.
-		return this.$store.get("~driver", this.driver.config);
-	}
+    public get schema(): S {
+        return this["~schema"].defined;
+    }
 
-	/**
-	 * Registers a hook.
-	 */
-	public on<E extends keyof KfgHooks<S>>(
-		event: E,
-		fn: KfgHookCallback<S, E>,
-	): this {
-		if (!this.hooks[event]) {
-			this.hooks[event] = [];
-		}
-		this.hooks[event]?.push(fn as any);
-		return this;
-	}
+    constructor(driver: D, schema: S) {
+        this["~driver"] = driver;
+        
+        const compiled = buildTypeBoxSchema(schema);
+        addSmartDefaults(compiled);
+        
+        this["~schema"] = {
+            defined: schema,
+            compiled: compiled
+        };
 
-	private runHooks<E extends keyof KfgHooks<S>>(
-		event: E,
-		...args: KfgHooks<S>[E]
-	): any | Promise<any> {
-		const hooks = this.hooks[event];
+        // Initialize proxy
+        this.config = new Proxy({}, {
+            get: (_target, prop) => {
+                if (!this["~loaded"]) {
+                    throw new Error(notLoadedMessage("reading from config proxy"));
+                }
+                return Reflect.get(this["~cache"], prop);
+            },
+            set: () => {
+                throw new Error("[Kfg] Config is read-only via proxy. Use .set() to modify and persist.");
+            },
+            ownKeys: () => {
+                return this["~loaded"] ? Reflect.ownKeys(this["~cache"]) : [];
+            },
+            getOwnPropertyDescriptor: (_target, prop) => {
+                return this["~loaded"] ? Reflect.getOwnPropertyDescriptor(this["~cache"], prop) : undefined;
+            }
+        }) as StaticSchema<S>;
+    }
 
-		if (!hooks || hooks.length === 0) {
-			return this.driver.async ? Promise.resolve(args[0]) : args[0];
-		}
-
-		let currentData = args[0];
-		const otherArgs = args.slice(1);
-
-		if (this.driver.async) {
-			return (async () => {
-				for (const hook of hooks) {
-					const result = await (hook as any)(currentData, ...otherArgs);
-					if (result !== undefined && event !== "ready") {
-						currentData = result;
-					}
-				}
-				return currentData;
-			})();
-		}
-
-		for (const hook of hooks) {
-			const result = (hook as any)(currentData, ...otherArgs);
-			if (result !== undefined && event !== "ready") {
-				currentData = result;
-			}
-		}
-		return currentData;
-	}
-
-	/**
-	 * Mounts the configuration using the driver.
-	 * @param options - The loading options.
-	 */
-	public mount(
-		options?: D["config"] & {
-			only_importants?: boolean;
-		},
-	): inPromise<D["async"], void> {
-		this._lastOptions = options;
-		let schemaToLoad = this.schema;
-		if (options?.only_importants) {
-			schemaToLoad = makeSchemaOptional(this.schema) as S;
-		}
-
-		const processResult = (result: any) => {
-			this.validate(result, schemaToLoad);
-			this.loaded = true;
-			this.runHooks("ready");
-		};
-
-		const result = this.driver.mount(this, options);
-		if (this.driver.async) {
-			return (result as Promise<void>).then(processResult) as inPromise<
-				D["async"],
-				void
-			>;
-		}
-		processResult(result);
-		return undefined as inPromise<D["async"], void>;
-	}
-
-	/**
-	 * Alias for mount().
-	 */
+    /**
+     * Loads the configuration from the driver.
+     */
 	public load(
 		options?: Partial<D["config"]> & {
 			only_importants?: boolean;
 		},
-	) {
-		return this.mount(options);
-	}
+	): inPromise<D["async"], void> {
+        this["~lastLoadOptions"] = options;
+        if (options) {
+            const { only_importants: _onlyImportants, ...driverConfig } = options as any;
+            this["~driver"].config = {
+                ...this["~driver"].config,
+                ...driverConfig,
+            };
+        }
 
-	/**
-	 * Reloads the configuration.
-	 * @param options - The loading options.
-	 */
-	public reload(
+        let schemaToLoad = this["~schema"].defined;
+        let validationSchema = this["~schema"].compiled;
+
+        if (options?.only_importants) {
+            schemaToLoad = makeSchemaOptional(schemaToLoad) as S;
+            const tempSchema = buildTypeBoxSchema(schemaToLoad);
+            addSmartDefaults(tempSchema);
+            validationSchema = tempSchema;
+        }
+
+        const result = this["~driver"].load(schemaToLoad);
+
+        const process = (rawData: any) => {
+             const cleanData = this.validateAndClean(rawData, validationSchema);
+             this["~cache"] = cleanData;
+             this["~loaded"] = true;
+        };
+
+        if (this["~driver"].async) {
+            return (result as Promise<any>).then(process) as any;
+        }
+
+        process(result);
+        return undefined as any;
+    }
+
+    public reload(
 		options?: Partial<D["config"]> & {
 			only_importants?: boolean;
 		},
-	) {
-		this.loaded = false;
-		return this.mount(options || this._lastOptions);
-	}
-
-	/**
-	 * Saves the configuration.
-	 * @param data Optional data to save.
-	 */
-	public save(data?: any): inPromise<D["async"], void> {
-		if (!this.loaded) {
-			throw new Error("[Kfg] Config not loaded. Call mount() first.");
-		}
-		return this.driver.saveTo(this, data) as inPromise<D["async"], void>;
-	}
-
-	/**
-	 * Gets a value from the configuration.
-	 * @param path The path to the value.
-	 * @returns The value at the given path.
-	 */
-	public get<
-		P extends M extends true
-			? `${string}.${Paths<StaticSchema<S>>}` | string
-			: Paths<StaticSchema<S>>,
-	>(
-		path: P,
-	): inPromise<
-		D["async"],
-		M extends true
-			? MultiDeepGet<StaticSchema<S>, P>
-			: DeepGet<StaticSchema<S>, P>
-	> {
-		if (!this.loaded) {
-			throw new Error("[Kfg] Config not loaded. Call mount() first.");
-		}
-		return this.driver.get(this, path as string);
-	}
-
-	/**
-	 * Checks if a value exists in the configuration.
-	 * @param paths The paths to the values.
-	 * @returns True if all values exist, false otherwise.
-	 */
-	public has<
-		P extends M extends true
-			? `${string}.${Paths<StaticSchema<S>>}` | string
-			: Paths<StaticSchema<S>>,
-	>(...paths: P[]): inPromise<D["async"], boolean> {
-		if (!this.loaded) {
-			throw new Error("[Kfg] Config not loaded. Call mount() first.");
-		}
-		return this.driver.has(this, ...(paths as string[])) as inPromise<
-			D["async"],
-			boolean
-		>;
-	}
-
-	/**
-	 * Sets a value in the configuration.
-	 */
-	public set<
-		P extends M extends true
-			? `${string}.${Paths<StaticSchema<S>>}` | string
-			: Paths<StaticSchema<S>>,
-	>(
-		path: P,
-		value: M extends true
-			? MultiDeepGet<StaticSchema<S>, P>
-			: DeepGet<StaticSchema<S>, P>,
-		options?: { description?: string },
 	): inPromise<D["async"], void> {
-		if (!this.loaded) {
-			throw new Error("[Kfg] Config not loaded. Call mount() first.");
-		}
+        this["~loaded"] = false;
+        const nextOptions = options ?? this["~lastLoadOptions"];
+        return this.load(nextOptions);
+    }
 
-		const run = (processedValue: any) => {
-			return this.driver.set(
-				this,
-				path as string,
-				processedValue,
-				options,
-			) as inPromise<D["async"], void>;
-		};
+    public save(): inPromise<D["async"], void> {
+        if (!this["~loaded"]) throw new Error(notLoadedMessage("saving"));
+        return this["~driver"].save(this["~cache"]) as any;
+    }
 
-		if (this.multimode) {
-			const parts = (path as string).split(".");
-			const id = parts[0];
+    public get<P extends Paths<StaticSchema<S>>>(path: P): DeepGet<StaticSchema<S>, P> {
+        if (!this["~loaded"]) throw new Error(notLoadedMessage(`reading "${String(path)}"`));
+        return getProperty(this["~cache"], path as string);
+    }
 
-			if (parts.length === 1) {
-				const getItem = this.get(id as any);
+    public root<P extends RootPaths<StaticSchema<S>>>(path: P): DeepGet<StaticSchema<S>, P> {
+        return this.get(path as any) as DeepGet<StaticSchema<S>, P>;
+    }
 
-				const processHook = (oldItem: any) => {
-					if (oldItem) {
-						return this.runHooks("update", value as any, oldItem);
-					}
-					return value;
-				};
+    public set<P extends Paths<StaticSchema<S>>>(
+        path: P, 
+        value: DeepGet<StaticSchema<S>, P>,
+        descriptionOrOptions?: string | { description?: string }
+    ): inPromise<D["async"], void> {
+        if (!this["~loaded"]) throw new Error(notLoadedMessage(`writing "${String(path)}"`));
+        const description =
+            typeof descriptionOrOptions === "string"
+                ? descriptionOrOptions
+                : descriptionOrOptions?.description;
+        
+        const original = JSON.parse(JSON.stringify(this["~cache"]));
+        setProperty(this["~cache"], path as string, value);
+        
+        try {
+            this["~cache"] = this.validateAndClean(this["~cache"], this["~schema"].compiled);
+        } catch (e) {
+            this["~cache"] = original;
+            throw e;
+        }
 
-				if (this.driver.async) {
-					return (getItem as Promise<any>)
-						.then((oldItem) => processHook(oldItem))
-						.then((processed) => run(processed)) as any;
-				}
+        if (this["~driver"].update) {
+            return this["~driver"].update(path as string, value, description) as any;
+        } else {
+            return this["~driver"].save(this["~cache"], { path: path as string, description }) as any;
+        }
+    }
 
-				const oldItem = getItem;
-				const processed = processHook(oldItem);
-				return run(processed) as any;
-			}
-		}
-
-		return this.driver.set(this, path as string, value, options) as inPromise<
-			D["async"],
-			void
-		>;
-	}
-
-	/**
-	 * Inserts a partial value into an object in the configuration.
-	 */
-	public insert<
-		P extends M extends true
-			? `${string}.${RootPaths<StaticSchema<S>>}` | string
-			: RootPaths<StaticSchema<S>>,
-	>(
+	public insert<P extends RootPaths<StaticSchema<S>>>(
 		path: P,
-		partial: Partial<
-			M extends true
-				? MultiDeepGet<StaticSchema<S>, P>
-				: DeepGet<StaticSchema<S>, P>
-		>,
+		partial: Partial<DeepGet<StaticSchema<S>, P>>,
 	): inPromise<D["async"], void> {
-		if (!this.loaded) {
-			throw new Error("[Kfg] Config not loaded. Call mount() first.");
+		if (!this["~loaded"]) {
+			throw new Error(notLoadedMessage(`inserting into "${String(path)}"`));
 		}
-		return this.driver.insert(this, path as string, partial) as inPromise<
-			D["async"],
-			void
-		>;
+        
+        const currentObject = getProperty(this["~cache"], path as string);
+        if (typeof currentObject !== "object" || currentObject === null) {
+            throw new Error(`Cannot insert into non-object at path: ${String(path)}`);
+        }
+        
+        const original = JSON.parse(JSON.stringify(this["~cache"]));
+        Object.assign(currentObject, partial);
+        
+        try {
+            this["~cache"] = this.validateAndClean(this["~cache"], this["~schema"].compiled);
+        } catch (e) {
+            this["~cache"] = original;
+            throw e;
+        }
+        
+        if (this["~driver"].update) {
+            return this["~driver"].update(path as string, currentObject) as any;
+        } else {
+            return this["~driver"].save(this["~cache"]) as any;
+        }
 	}
 
-	/**
-	 * Injects a partial value directly into the root configuration object.
-	 */
 	public inject(data: Partial<StaticSchema<S>>): inPromise<D["async"], void> {
-		return this.driver.inject(this, data) as inPromise<D["async"], void>;
-	}
-
-	/**
-	 * Deletes a value from the configuration.
-	 */
-	public del<
-		P extends M extends true
-			? `${string}.${Paths<StaticSchema<S>>}` | string
-			: Paths<StaticSchema<S>>,
-	>(path: P): inPromise<D["async"], void> {
-		if (!this.loaded) {
-			throw new Error("[Kfg] Config not loaded. Call mount() first.");
+        if (!this["~loaded"]) {
+			throw new Error(notLoadedMessage("injecting data"));
 		}
+        
+        const original = JSON.parse(JSON.stringify(this["~cache"]));
+        this["~cache"] = deepMerge(this["~cache"], data);
+        
+        try {
+            this["~cache"] = this.validateAndClean(this["~cache"], this["~schema"].compiled);
+        } catch (e) {
+            this["~cache"] = original;
+            throw e;
+        }
+        
+        return this["~driver"].save(this["~cache"]) as any;
+    }
 
-		const run = () => {
-			return this.driver.del(this, path as string) as inPromise<
-				D["async"],
-				void
-			>;
-		};
+    public del<P extends Paths<StaticSchema<S>>>(path: P): inPromise<D["async"], void> {
+        if (!this["~loaded"]) throw new Error(notLoadedMessage(`deleting "${String(path)}"`));
+        
+        const original = JSON.parse(JSON.stringify(this["~cache"]));
+        const deleted = deleteProperty(this["~cache"], path as string);
+        
+        if (!deleted) return (this["~driver"].async ? Promise.resolve() : undefined) as any;
 
-		if (this.multimode) {
-			const parts = (path as string).split(".");
-			if (parts.length === 1) {
-				const id = parts[0];
-				const getItem = this.get(id as any);
+        try {
+            this["~cache"] = this.validateAndClean(this["~cache"], this["~schema"].compiled);
+        } catch (e) {
+             this["~cache"] = original;
+             throw e;
+        }
+        
+        if (this["~driver"].delete) {
+            return this["~driver"].delete(path as string) as any;
+        } else {
+            return this["~driver"].save(this["~cache"]) as any;
+        }
+    }
 
-				const processHook = (oldItem: any) => {
-					if (oldItem) {
-						return this.runHooks("delete", oldItem);
-					}
-					return null;
-				};
+    public has<P extends Paths<StaticSchema<S>>>(...paths: P[]): boolean {
+        if (!this["~loaded"]) {
+            throw new Error(notLoadedMessage("checking paths"));
+        }
+        return paths.every((path) => getProperty(this["~cache"], path as string) !== undefined);
+    }
 
-				if (this.driver.async) {
-					return (getItem as Promise<any>)
-						.then((oldItem) => processHook(oldItem))
-						.then(() => run()) as any;
-				}
-
-				const oldItem = getItem;
-				processHook(oldItem);
-				return run() as any;
-			}
+	public conf<P extends Paths<StaticSchema<S>>>(path: P): DeepGet<S, P> {
+		if (!this["~loaded"]) {
+			throw new Error(notLoadedMessage(`reading schema for "${String(path)}"`));
 		}
-
-		return run() as any;
+		return getProperty(this["~schema"].defined, path as string) as DeepGet<S, P>;
 	}
 
-	public create(data: Partial<StaticSchema<S>>): inPromise<D["async"], any> {
-		if (!this.loaded) {
-			throw new Error("[Kfg] Config not loaded. Call mount() first.");
-		}
+    public schematic<P extends Paths<StaticSchema<S>>>(path: P): DeepGet<S, P> {
+        return this.conf(path);
+    }
 
-		const run = (processedData: any) => {
-			return this.driver.create(this, processedData);
-		};
+    private validateAndClean(data: any, schema: TObject): any {
+        const current = Value.Default(schema, data) as any;
+        Value.Convert(schema, current);
 
-		const hookResult = this.runHooks("create", data as any);
-		if (this.driver.async) {
-			return (hookResult as Promise<any>).then(run) as any;
-		}
-		return run(hookResult) as any;
-	}
+        if (!Value.Check(schema, current)) {
+            const errors = [...Value.Errors(schema, current)];
 
-	public size(): number {
-		return this.driver.size(this);
-	}
+            let message = defaultValidationMessage(errors);
+            if (this["~driver"].formatError) {
+                const customMessage = this["~driver"].formatError(errors);
+                if (customMessage) {
+                    message = customMessage;
+                }
+            }
 
-	public where(id: string) {
-		const self = this;
-		return {
-			get(path?: string) {
-				const fullPath = path ? `${id}.${path}` : id;
-				return self.get(fullPath as any);
-			},
-			set(path: string, value: any) {
-				const fullPath = `${id}.${path}`;
-				return self.set(fullPath as any, value);
-			},
-			del(path?: string) {
-				const fullPath = path ? `${id}.${path}` : id;
-				return self.del(fullPath as any);
-			},
-			toJSON() {
-				return undefined;
-			},
-		};
-	}
+            if (this["~driver"].forceExit) {
+                console.error(message);
+                process.exit(1);
+            }
 
-	/**
-	 * Validates data against the schema.
-	 */
-	private validate(data: any, schema = this.schema): any {
-		if (this.multimode) {
-			if (typeof data !== "object" || data === null) {
-				return {};
-			}
-			for (const key in data) {
-				data[key] = this.validateItem(data[key], schema);
-			}
-			return data;
-		}
-		return this.validateItem(data, schema);
-	}
+            throw new Error(message);
+        }
+        return current;
+    }
 
-	private validateItem(data: any, schema: SchemaDefinition): any {
-		const compiledSchema = buildTypeBoxSchema(schema);
-		addSmartDefaults(compiledSchema);
-		const configWithDefaults = Value.Default(compiledSchema, data) as any;
-		Value.Convert(compiledSchema, configWithDefaults);
-
-		if (!Value.Check(compiledSchema, configWithDefaults)) {
-			const errors = [...Value.Errors(compiledSchema, configWithDefaults)];
-			throw new Error(
-				`[Kfg] Validation failed:\n${errors
-					.map((e) => `- ${e.path}: ${e.message}`) // Corrected escape sequence for newline
-					.join("\n")}`,
-			);
-		}
-		return configWithDefaults;
-	}
-
-	/**
-	 * Unmounts the driver.
-	 */
-	public unmount() {
-		this.driver.unmount?.(this);
-	}
-
-	/**
-	 * Returns cached data.
-	 */
-	public toJSON(): StaticSchema<S> {
-		if (!this.loaded) {
-			throw new Error("[Kfg] Config not loaded. Call mount() first.");
-		}
-		return this.driver.toJSON(this);
-	}
+    public toJSON(): inPromise<D["async"], StaticSchema<S>> {
+        if (!this["~loaded"]) {
+            throw new Error(notLoadedMessage("exporting JSON"));
+        }
+        if (this["~driver"].async) {
+            return Promise.resolve(this["~cache"] as StaticSchema<S>) as any;
+        }
+        return this["~cache"] as any;
+    }
 }

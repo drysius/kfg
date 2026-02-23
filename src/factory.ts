@@ -14,6 +14,7 @@ import { Value } from "@sinclair/typebox/value";
 import { rule } from "./rule";
 import type { CustomOptions, SchemaDefinition } from "./types";
 import { addSmartDefaults, buildTypeBoxSchema } from "./utils/schema";
+import { defaultValidationMessage } from "./errors";
 
 // Helper function to extract values from string arrays, const arrays, or enums
 function getEnumValues<T extends readonly (string | number)[] | object>(
@@ -176,11 +177,7 @@ const _c = {
 
 		if (!Value.Check(compiledSchema, configWithDefaults)) {
 			const errors = [...Value.Errors(compiledSchema, configWithDefaults)];
-			throw new Error(
-				`Validation failed:\n${errors
-					.map((e) => `- ${e.path}: ${e.message}`)
-					.join("\n")}`,
-			);
+			throw new Error(defaultValidationMessage(errors));
 		}
 		return configWithDefaults;
 	},

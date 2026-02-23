@@ -28,9 +28,9 @@ async function generateLlmsFile() {
         const content = await readFile(file, "utf-8");
         const relativePath = relative(process.cwd(), file);
         
-        outputContent += `\n--- START OF FILE: ${relativePath} ---\n`;
+        outputContent += `--- START OF FILE: ${relativePath} ---\n`;
         outputContent += content;
-        outputContent += `\n--- END OF FILE: ${relativePath} ---\n`;
+        outputContent += `--- END OF FILE: ${relativePath} ---\n`;
     }
 
     await writeFile(OUTPUT_FILE, outputContent, "utf-8");

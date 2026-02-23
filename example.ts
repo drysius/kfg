@@ -1,53 +1,80 @@
-import { Kfg, c, JsonDriver, KfgDriver } from "./src";
+import * as fs from "node:fs";
+import { Kfg } from "./src/kfg";
+import { JsonDriver } from "./src/drivers/json-driver";
+import { EnvDriver } from "./src/drivers/env-driver";
+import { c } from "./src/factory";
 
-// Mock bcrypt for example
-const bcrypt = (pass: string) => `hashed_${pass}`;
+const schema = {
+    server: {
+        host: c.string({ default: "localhost", description: "The server host" }),
+        port: c.number({ default: 3000, description: "The server port" }),
+        ssl: c.boolean({ default: false })
+    },
+    database: {
+        url: c.string({ description: "Database connection URL" }),
+        pool: {
+            min: c.number({ default: 1 }),
+            max: c.number({ default: 10 })
+        }
+    },
+    apiKey: c.string({ default: "default-key" }),
+    features: c.array(c.string(), { default: ["api"] })
+};
 
-const User = new Kfg(new KfgDriver(JsonDriver.definition), {
-    id: c.number({ default: 0 }),
-    username: c.string(),
-    password: c.string()
-}, true) // Enable multimode
-.on('create', (data) => {
-    // data is inferred as { id: number, username: string, password: string }
-    if (!data.id) data.id = User.size() + 1;
-    data.password = bcrypt(data.password);
-    console.log("[Hook:create] Preparing user:", data.username);
-    return data;
-})
-.on('update', (newdata, olddata) => {
-    // newdata and olddata are inferred correctly
-    if (newdata.password !== olddata.password) {
-         newdata.password = bcrypt(newdata.password);
-    }
-    console.log(`[Hook:update] User ${olddata.username} updated.`);
-    return newdata;
-})
-.on('ready', () => {
-    console.log("[Hook:ready] Kfg is loaded and ready!");
+const exampleJsonPath = "config.example.json";
+const exampleEnvPath = ".env.example";
+const requiredEnvKey = "KFG_EXAMPLE_REQUIRED_SECRET_9F2A";
+delete process.env[requiredEnvKey];
+
+// Force an invalid JSON file to demonstrate friendly validation errors.
+fs.writeFileSync(
+    exampleJsonPath,
+    JSON.stringify({ server: { host: "localhost", port: 3000, ssl: false } }, null, 2),
+);
+
+// Initialize Kfg with a JSON driver
+const config = new Kfg(new JsonDriver({ path: exampleJsonPath, keyroot:true }), schema);
+
+try {
+    // 1. Load configuration
+    console.log("Loading configuration...");
+    config.load();config.has('features', 'database')
+
+    // 2. Access data (Type-safe!)
+    console.log(`Server running on ${config.config.server.host}:${config.config.server.port}`);
+    console.log("Features:", config.get('features'));
+
+    // 3. Modify and Save
+    console.log("Updating port to 8080...");
+    config.set("server.port", 8080, "Updated port for production");
+    // 4. Verify update
+    console.log("New port:", config.config.server.port);
+
+} catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error(message);
+}
+
+// Example with Env Driver for .env files
+// Force an env file without a required variable to demonstrate env validation errors.
+fs.writeFileSync(exampleEnvPath, "DEBUG=false\nAPP_NAME=MyApp\n");
+
+const envConfig = new Kfg(new EnvDriver({ path: exampleEnvPath }), {
+    app_name: c.string({ default: "MyApp" }),
+    debug: c.boolean({ default: true }),
+    required_secret: c.string({ prop: requiredEnvKey }),
 });
 
-// Load configuration with pattern
-User.load({
-    path: "./data/users/{id}.json"
-});
-
-console.log("Initial users:", User.size());
-
-// Create a new user
-const newUser = User.create({
-    username: "drylian",
-    password: "secure_password"
-});
-
-console.log("Created User:", newUser);
-console.log("Total users:", User.size());
-
-// Scope to specific user
-const user1 = User.where(String(newUser.id));
-
-// Update username (Triggering update hook if replacing item)
-// Note: hook only runs if we replace the whole item currently in kfg.ts
-User.set(String(newUser.id), { ...newUser, username: "drylian_updated" });
-
-console.log("Updated username:", User.get(`${newUser.id}.username`));
+try {
+    console.log("\nLoading Env config...");
+    envConfig.load();
+    console.log("App Name:", envConfig.get('app_name'));
+    console.log("Debug Mode:", envConfig.config.debug);
+    
+    // Updating .env
+    envConfig.set("debug", false);
+    console.log("Debug Mode updated to:", envConfig.config.debug);
+} catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error(message);
+}

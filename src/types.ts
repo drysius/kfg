@@ -1,19 +1,38 @@
 import type {
 	SchemaOptions,
 	Static,
-	TAny,
 	TObject,
 	TSchema,
 } from "@sinclair/typebox";
-import type { Kfg } from "./kfg";
-import type { KfgDriver } from "./kfg-driver";
+
 export type { TSchema, TObject, SchemaOptions };
 
-// --- Driver Related Types ---
+/**
+ * A recursive type representing the user-friendly schema definition.
+ */
+export type SchemaDefinition =
+	| TSchema // Any valid TypeBox schema (string, number, array, etc.)
+	| {
+			[key: string]: SchemaDefinition;
+	  };
+
+/**
+ * A mapped type that converts a SchemaDefinition into a static TypeScript type.
+ */
+export type StaticSchema<T> =
+	// If it's a TypeBox array, transform to item[] type
+	T extends { type: "array"; items: infer I }
+		? StaticSchema<I>[]
+		: // If it's any simple TSchema
+			T extends TSchema
+			? Static<T>
+			: // If it's a SchemaDefinition object, apply recursively
+				T extends SchemaDefinition
+				? { -readonly [K in keyof T]: StaticSchema<T[K]> }
+				: never;
 
 /**
  * Represents a path to a value in an object.
- * @template T The type of the object.
  */
 export type Paths<T> = T extends object
 	? {
@@ -28,8 +47,8 @@ export type Paths<T> = T extends object
 	: never;
 
 /**
- * Represents a path to a value in an object.
- * @template T The type of the object.
+ * Represents a path to a value in an object, supporting partial deep paths.
+ * Used for inserting partial data.
  */
 export type RootPaths<T> = T extends object
 	? {
@@ -45,8 +64,6 @@ export type RootPaths<T> = T extends object
 
 /**
  * Gets the type of a value at a given path in an object.
- * @template T The type of the object.
- * @template P The path to the value.
  */
 export type DeepGet<T, P extends string> = P extends `${infer K}.${infer R}`
 	? K extends keyof T
@@ -55,140 +72,6 @@ export type DeepGet<T, P extends string> = P extends `${infer K}.${infer R}`
 	: P extends keyof T
 		? T[P]
 		: never;
-
-/**
- * Gets the type of a value at a given path in an object (ignoring the first segment).
- * @template T The type of the object.
- * @template P The path to the value.
- */
-export type MultiDeepGet<T, P extends string> = P extends `${string}.${infer R}`
-	? DeepGet<T, R>
-	: T;
-
-/**
- * Represents a value that can be a promise or a plain value.
- * @template Async The type of the async flag.
- * @template Result The type of the result.
- */
-export type inPromise<Async extends boolean, Result> = Async extends true
-	? Promise<Result>
-	: Result;
-
-/**
- * Represents the configuration of a driver.
- */
-export type DriverConfig = Record<any, any>;
-
-/**
- * The interface for a Driver definition.
- */
-export interface Driver<
-	AsyncDriver extends boolean,
-	Config extends DriverConfig = {},
-> {
-	identify: string;
-	async: AsyncDriver;
-	config?: Partial<Config>;
-	onMount?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
-		opts?: any,
-	) => inPromise<AsyncDriver, any>;
-	onUnmount?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
-	) => void;
-	onRequest?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
-		opts: any,
-	) => inPromise<AsyncDriver, void>;
-	onGet?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
-		opts: any,
-	) => inPromise<AsyncDriver, any>;
-	onUpdate?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
-		opts: any,
-	) => inPromise<AsyncDriver, void>;
-	onDelete?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
-		opts: any,
-	) => inPromise<AsyncDriver, void>;
-	onMerge?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
-		opts: any,
-	) => inPromise<AsyncDriver, void>;
-	onHas?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
-		opts: any,
-	) => inPromise<AsyncDriver, boolean>;
-	onInject?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
-		opts: any,
-	) => inPromise<AsyncDriver, void>;
-	onToJSON?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
-	) => inPromise<AsyncDriver, any>;
-	save?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
-		data?: any,
-	) => inPromise<AsyncDriver, void>;
-	onCreate?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
-		opts: { data: any },
-	) => inPromise<AsyncDriver, any>;
-	onList?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
-		opts?: any,
-	) => inPromise<AsyncDriver, any>;
-	onSize?: (
-		kfg: Kfg<KfgDriver<Config, AsyncDriver>, Record<string, TAny>, any>,
-	) => number;
-}
-
-/**
- * Definição dos eventos e seus argumentos (Tuplas)
- */
-export type KfgHooks<S extends SchemaDefinition> = {
-	create: [data: StaticSchema<S>];
-	update: [newdata: StaticSchema<S>, olddata: StaticSchema<S>];
-	delete: [data: StaticSchema<S>];
-	ready: [];
-};
-
-/**
- * Helper para extrair a assinatura da função baseada no nome do evento
- */
-export type KfgHookCallback<
-	S extends SchemaDefinition,
-	E extends keyof KfgHooks<S>,
-> = (...args: KfgHooks<S>[E]) => any | Promise<any>;
-
-export type HookName = keyof KfgHooks<{}>;
-
-// --- Schema Related Types ---
-
-/**
- * A recursive type representing the user-friendly schema definition.
- */
-export type SchemaDefinition =
-	| TSchema // Qualquer schema TypeBox válido (string, number, array, etc.)
-	| {
-			[key: string]: SchemaDefinition;
-	  };
-/**
- * A mapped type que converte um SchemaDefinition em tipo estático TypeScript.
- * Agora com suporte a arrays do TypeBox.
- */
-export type StaticSchema<T> =
-	// Se for um array TypeBox, transforma no tipo do item[]
-	T extends { type: "array"; items: infer I }
-		? StaticSchema<I>[]
-		: // Se for qualquer TSchema simples
-			T extends TSchema
-			? Static<T>
-			: // Se for um objeto SchemaDefinition, aplica recursivamente
-				T extends SchemaDefinition
-				? { -readonly [K in keyof T]: StaticSchema<T[K]> }
-				: never;
 
 /**
  * Custom metadata properties that can be added to a schema.
@@ -202,3 +85,12 @@ export interface CustomOptions<Default = any> {
 	refines?: ((value: unknown) => boolean | string)[];
 	createms?: boolean;
 }
+
+/**
+ * Helper type for async/sync return values.
+ * Since we are moving to strict synchronous for now, this might just be Result.
+ * But keeping it for potential compatibility if we re-introduce async drivers later.
+ */
+export type inPromise<Async extends boolean, Result> = Async extends true
+    ? Promise<Result>
+    : Result;

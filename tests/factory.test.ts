@@ -1,11 +1,9 @@
 import { describe, it, expect, afterAll, beforeEach } from "bun:test";
 import * as fs from "node:fs";
-import * as path from "node:path";
 import { c } from "../src/factory";
 import { Kfg } from "../src/kfg";
 import { JsonDriver } from "../src/drivers/json-driver";
 import { EnvDriver } from "../src/drivers/env-driver";
-import { KfgDriver } from "../src/kfg-driver";
 
 const TEST_JSON_PATH = "test-config.json";
 const TEST_ENV_PATH = ".env.test";
@@ -154,8 +152,8 @@ describe("Schema Factory: c", () => {
 					port: c.number({ default: 3000 }),
 					name: c.string({ default: "MyApp" }),
 				};
-				const config = new Kfg(new KfgDriver(JsonDriver.definition), schema);
-				config.load({ path: TEST_JSON_PATH });
+				const config = new Kfg(new JsonDriver({ path: TEST_JSON_PATH }), schema);
+				config.load();
 
 				expect(config.get("port")).toBe(3000);
 				expect(config.get("name")).toBe("MyApp");
@@ -168,8 +166,8 @@ describe("Schema Factory: c", () => {
 					port: c.number({ default: 3000 }),
 					name: c.string({ default: "MyApp" }),
 				};
-				const config = new Kfg(new KfgDriver(JsonDriver.definition), schema);
-				config.load({ path: TEST_JSON_PATH });
+				const config = new Kfg(new JsonDriver({ path: TEST_JSON_PATH }), schema);
+				config.load();
 
 				expect(config.get("port")).toBe(8080);
 				expect(config.get("name")).toBe("MyTestApp");
@@ -183,8 +181,8 @@ describe("Schema Factory: c", () => {
 					port: c.number({ default: 3000 }),
 					appName: c.string({ default: "MyApp", prop: "APP_NAME" }),
 				};
-				const config = new Kfg(new KfgDriver(EnvDriver.definition), schema);
-				config.load({ path: TEST_ENV_PATH });
+				const config = new Kfg(new EnvDriver({ path: TEST_ENV_PATH, forceexit: false }), schema);
+				config.load();
 
 				expect(config.get("port")).toBe(3000);
 				expect(config.get("appName")).toBe("MyApp");
@@ -199,8 +197,8 @@ describe("Schema Factory: c", () => {
 						name:c.string({ default: "MyApp", prop: "APP_NAME" })
 					},
 				};
-				const config = new Kfg(new KfgDriver(EnvDriver.definition), schema);
-				config.load({ path: TEST_ENV_PATH });
+				const config = new Kfg(new EnvDriver({ path: TEST_ENV_PATH, forceexit: false }), schema);
+				config.load();
 
 				expect(config.get("port")).toBe(8080);
 				expect(config.get("app.name")).toBe("MyTestApp");

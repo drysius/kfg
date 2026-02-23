@@ -91,12 +91,14 @@ export function updateEnvContent(
 			) {
 				if (lineIndex > 0 && !newLines[lineIndex - 1].trim().startsWith("#")) {
 					newLines.splice(lineIndex, 0, comment);
-				}
+				} else if (lineIndex === 0) {
+                     newLines.splice(0, 0, comment);
+                }
 			}
 		}
 	} else {
 		// Key doesn't exist, add it to the end.
-		if (newLines[newLines.length - 1] !== "") {
+		if (newLines.length > 0 && newLines[newLines.length - 1] !== "") {
 			newLines.push(""); // Add a blank line for separation
 		}
 		if (description) {

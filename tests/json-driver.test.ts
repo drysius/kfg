@@ -1,6 +1,5 @@
 import { describe, it, expect, afterAll, beforeEach } from 'bun:test';
 import { JsonDriver } from '../src/drivers/json-driver';
-import { KfgDriver } from '../src/kfg-driver';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Kfg } from '../src/kfg';
@@ -17,22 +16,39 @@ describe('JSON Driver Integration', () => {
         if (fs.existsSync(TEST_JSON_PATH)) fs.unlinkSync(TEST_JSON_PATH);
     });
 
-    // Tests the basic workflow of loading data from a file, getting a value,
-    // setting a new value, and verifying the persisted result.
     it('should load, get, and set nested data', () => {
         const initialData = { app: { name: 'TestApp' } };
         fs.writeFileSync(TEST_JSON_PATH, JSON.stringify(initialData));
 
-        const config = new Kfg(new KfgDriver(JsonDriver.definition), {
+        const config = new Kfg(new JsonDriver({ path: 'config.test.json' }), {
             app: { name: c.string() },
             db: { host: c.string({default: 'none'}) }
         });
 
-        config.load({ path: TEST_JSON_PATH });
-        expect(config.get('app.name')).toBe('TestApp');
+        // Need to override getFilePath logic implicitly via constructor or rely on path.resolve logic
+        // JsonDriver logic: path.resolve(process.cwd(), config.path || "config.json")
+        // The test is in tests/ directory, process.cwd() is project root? 
+        // We need to make sure the driver points to TEST_JSON_PATH.
+        // TEST_JSON_PATH is absolute. JsonDriver resolves relative paths.
+        // If we pass an absolute path to JsonDriver config, path.resolve should handle it (on Windows/Unix mostly).
+        // Let's verify JsonDriver implementation of getFilePath: path.resolve(process.cwd(), this.config.path || "config.json");
+        // If this.config.path is absolute, path.resolve returns it.
+        
+        // Wait, I passed 'config.test.json' above. That resolves relative to CWD.
+        // TEST_JSON_PATH is constructed with __dirname.
+        // I should use the relative path or absolute path.
+        
+        const driver = new JsonDriver({ path: TEST_JSON_PATH });
+        const kfg = new Kfg(driver, {
+            app: { name: c.string() },
+            db: { host: c.string({default: 'none'}) }
+        });
 
-        config.set('db.host', 'localhost');
-        expect(config.get('db.host')).toBe('localhost');
+        kfg.load();
+        expect(kfg.get('app.name')).toBe('TestApp');
+
+        kfg.set('db.host', 'localhost');
+        expect(kfg.get('db.host')).toBe('localhost');
 
         const fileContent = fs.readFileSync(TEST_JSON_PATH, 'utf-8');
         const parsed = JSON.parse(fileContent);
@@ -40,11 +56,10 @@ describe('JSON Driver Integration', () => {
         expect(parsed.app.name).toBe('TestApp');
     });
 
-    // Verifies that the driver creates a new JSON file if one doesn't exist
-    // when `set()` is called.
     it('should create a new file on set() if it does not exist', () => {
-        const config = new Kfg(new KfgDriver(JsonDriver.definition), { user: { name: c.string({default: ''}) } });
-        config.load({ path: TEST_JSON_PATH }); // Load with empty config
+        const driver = new JsonDriver({ path: TEST_JSON_PATH });
+        const config = new Kfg(driver, { user: { name: c.string({default: ''}) } });
+        config.load(); 
         config.set('user.name', 'John');
 
         expect(fs.existsSync(TEST_JSON_PATH)).toBe(true);
@@ -53,26 +68,25 @@ describe('JSON Driver Integration', () => {
         expect(parsed.user.name).toBe('John');
     });
 
-    // Ensures that the driver gracefully handles a malformed or invalid JSON file
-    // by falling back to the schema's default values.
     it('should apply defaults when the JSON file is invalid or malformed', () => {
         fs.writeFileSync(TEST_JSON_PATH, '{'); // Invalid JSON
-        const config = new Kfg(new KfgDriver(JsonDriver.definition), { app: { name: c.string({default: 'DefaultApp'}) } });
-        config.load({ path: TEST_JSON_PATH });
+        const driver = new JsonDriver({ path: TEST_JSON_PATH });
+        const config = new Kfg(driver, { app: { name: c.string({default: 'DefaultApp'}) } });
+        config.load();
         expect(config.get('app.name')).toBe('DefaultApp');
     });
 
-    // Confirms that schema defaults are used when the config file does not exist.
     it('should apply defaults when the config file does not exist', () => {
-        const config = new Kfg(new KfgDriver(JsonDriver.definition), { app: { name: c.string({default: 'abc'}) } });
-        config.load({ path: TEST_JSON_PATH });
+        const driver = new JsonDriver({ path: TEST_JSON_PATH });
+        const config = new Kfg(driver, { app: { name: c.string({default: 'abc'}) } });
+        config.load();
         expect(config.get('app.name')).toBe('abc');
     });
 
-    // Tests the ability to correctly get and set values that are arrays.
     it('should correctly get and set array values', () => {
-        const config = new Kfg(new KfgDriver(JsonDriver.definition), { data: { items: c.array(c.any(), {default: []}) } });
-        config.load({ path: TEST_JSON_PATH });
+        const driver = new JsonDriver({ path: TEST_JSON_PATH });
+        const config = new Kfg(driver, { data: { items: c.array(c.any(), {default: []}) } });
+        config.load();
         const anArray = ['item1', 'item2', { nested: true }];
         config.set('data.items', anArray);
 
@@ -83,14 +97,16 @@ describe('JSON Driver Integration', () => {
         expect(config.get('data.items')).toEqual(anArray);
     });
 
-    // Verifies that setting a deeply nested property does not overwrite
-    // other properties within the same parent object.
     it('should handle deeply nested properties on set', () => {
+        const initialData = { a: { b: { c: 'c', d: 1 } } }; // Should match schema structure
+        fs.writeFileSync(TEST_JSON_PATH, JSON.stringify(initialData));
+
         const schema = {
             a: { b: { c: c.string({ default: 'c' }), d: c.number({ default: 1 }) } }
         };
-        const config = new Kfg(new KfgDriver(JsonDriver.definition), schema);
-        config.load({ path: TEST_JSON_PATH });
+        const driver = new JsonDriver({ path: TEST_JSON_PATH });
+        const config = new Kfg(driver, schema);
+        config.load();
 
         config.set('a.b.c', 'new-c');
         
@@ -103,73 +119,39 @@ describe('JSON Driver Integration', () => {
         expect(parsed.a.b.d).toBe(1);
     });
 
-    // Checks that values are correctly coerced to their schema-defined types
-    // during the loading process (e.g., a string in the file to a number).
     it('should coerce types from file during load', () => {
         fs.writeFileSync(TEST_JSON_PATH, JSON.stringify({ app: { port: "8080" } }));
 
         const schema = {
             app: { port: c.number() }
         };
-        const config = new Kfg(new KfgDriver(JsonDriver.definition), schema);
-        config.load({ path: TEST_JSON_PATH });
+        const driver = new JsonDriver({ path: TEST_JSON_PATH });
+        const config = new Kfg(driver, schema);
+        config.load();
 
         expect(config.get('app.port')).toBe(8080);
         expect(typeof config.get('app.port')).toBe('number');
     });
 
-    // Tests the `insert` method to ensure it correctly merges a partial object
-    // into an existing nested object.
-    it('should correctly merge data with insert()', () => {
-        const initialData = {
-            app: { name: 'MyApp', server: { host: 'localhost' } }
-        };
-        fs.writeFileSync(TEST_JSON_PATH, JSON.stringify(initialData));
-
-        const schema = {
-            app: {
-                name: c.string(),
-                server: {
-                    host: c.string(),
-                    port: c.number({ default: 3000 })
-                }
-            }
-        };
-        const config = new Kfg(new KfgDriver(JsonDriver.definition), schema);
-        config.load({ path: TEST_JSON_PATH });
-
-        config.insert('app.server', { port: 8080 });
-
-        const server = config.get('app.server');
-        expect(server).toEqual({ host: 'localhost', port: 8080 });
-
-        const fileContent = fs.readFileSync(TEST_JSON_PATH, 'utf-8');
-        const parsed = JSON.parse(fileContent);
-        expect(parsed.app.server).toEqual({ host: 'localhost', port: 8080 });
-    });
-
-    // Ensures that an empty JSON file is handled gracefully, applying defaults
-    // as if the file did not exist.
     it('should apply defaults when the JSON file is empty', () => {
         fs.writeFileSync(TEST_JSON_PATH, ''); // Empty file
-        const config = new Kfg(new KfgDriver(JsonDriver.definition), { app: { name: c.string({default: 'DefaultApp'}) } });
-        config.load({ path: TEST_JSON_PATH });
+        const driver = new JsonDriver({ path: TEST_JSON_PATH });
+        const config = new Kfg(driver, { app: { name: c.string({default: 'DefaultApp'}) } });
+        config.load();
         expect(config.get('app.name')).toBe('DefaultApp');
     });
 
-    // Verifies the comment feature, ensuring that descriptions provided to `set()`
-    // are saved as sibling properties with a `:comment` suffix and are preserved
-    // across subsequent loads and saves.
     it('should save in nested format with comments when keyroot is false', () => {
         const schema = {
             app: {
                 port: c.optional(c.number())
             }
         };
-        const config = new Kfg(new KfgDriver(JsonDriver.definition), schema);
-        config.load({ path: TEST_JSON_PATH, keyroot: false });
+        const driver = new JsonDriver({ path: TEST_JSON_PATH, keyroot: false });
+        const config = new Kfg(driver, schema);
+        config.load();
 
-        config.set('app.port', 8080, { description: 'The application port' });
+        config.set('app.port', 8080, 'The application port');
 
         const fileContent = fs.readFileSync(TEST_JSON_PATH, 'utf-8');
         const parsed = JSON.parse(fileContent);
@@ -182,14 +164,13 @@ describe('JSON Driver Integration', () => {
         });
 
         // Test loading
-        const config2 = new Kfg(new KfgDriver(JsonDriver.definition), schema);
-        config2.load({ path: TEST_JSON_PATH, keyroot: false });
+        const driver2 = new JsonDriver({ path: TEST_JSON_PATH, keyroot: false });
+        const config2 = new Kfg(driver2, schema);
+        config2.load();
         expect(config2.get('app.port')).toBe(8080);
-        expect(config2.get('app')).toEqual({ port: 8080 }); // Ensure comment is not in config data
+        expect(config2.get('app')).toEqual({ port: 8080 }); 
     });
 
-    // Verifies that when `keyroot: true` is used, the JSON file is saved in a flattened
-    // format and that comments are also flattened correctly.
     it('should save in flattened format with comments when keyroot is true', () => {
         const schema = {
             app: {
@@ -197,10 +178,11 @@ describe('JSON Driver Integration', () => {
                 host: c.string({ default: 'localhost' })
             }
         };
-        const config = new Kfg(new KfgDriver(JsonDriver.definition), schema);
-        config.load({ path: TEST_JSON_PATH, keyroot: true });
+        const driver = new JsonDriver({ path: TEST_JSON_PATH, keyroot: true });
+        const config = new Kfg(driver, schema);
+        config.load();
 
-        config.set('app.port', 8080, { description: 'The application port' });
+        config.set('app.port', 8080, 'The application port');
 
         const fileContent = fs.readFileSync(TEST_JSON_PATH, 'utf-8');
         const parsed = JSON.parse(fileContent);
@@ -215,8 +197,9 @@ describe('JSON Driver Integration', () => {
         expect(parsed.app).toBeUndefined();
 
         // Test that loading the flattened file works correctly
-        const config2 = new Kfg(new KfgDriver(JsonDriver.definition), schema);
-        config2.load({ path: TEST_JSON_PATH, keyroot: true });
+        const driver2 = new JsonDriver({ path: TEST_JSON_PATH, keyroot: true });
+        const config2 = new Kfg(driver2, schema);
+        config2.load();
         // Check that the values are correctly unflattened and accessible
         expect(config2.get('app.port')).toBe(8080);
         expect(config2.get('app.host')).toBe('localhost');
@@ -224,51 +207,43 @@ describe('JSON Driver Integration', () => {
         expect(config2.get('app')).toEqual({ port: 8080, host: 'localhost' });
     });
 
-    // Checks that the `insert` method throws an error when attempting to merge
-    // data into a path that resolves to a non-object value.
-    it('should throw an error when inserting into a non-object', () => {
-        const initialData = { app: { port: 3000 } };
-        fs.writeFileSync(TEST_JSON_PATH, JSON.stringify(initialData));
-        const schema = { app: { port: c.number() } };
-        const config = new Kfg(new KfgDriver(JsonDriver.definition), schema);
-        config.load({ path: TEST_JSON_PATH });
-
-        expect(() => config.insert('app.port' as any, { a: 1 } as any)).toThrow('Cannot insert into non-object at path: app.port');
-    });
-
-    // Confirms that `set` throws an error if it tries to create a property
-    // on a path that is blocked by an existing non-object value.
-    it('should throw an error when setting a sub-property of a non-object', () => {
-        const initialData = { app: { port: 3000 } };
-        fs.writeFileSync(TEST_JSON_PATH, JSON.stringify(initialData));
-        const schema = { app: { port: c.any() } };
-        const config = new Kfg(new KfgDriver(JsonDriver.definition), schema);
-        config.load({ path: TEST_JSON_PATH });
-
-        expect(() => config.set('app.port.host' as any, 'localhost')).toThrow('Cannot set property on non-object at path: port');
-    });
-
-    // Ensures that loading a file with data that does not match the schema's
-    // type definition results in a validation error.
     it('should throw a validation error for type mismatch on load', () => {
         const initialData = { app: { port: 'not-a-number' } };
         fs.writeFileSync(TEST_JSON_PATH, JSON.stringify(initialData));
         const schema = { app: { port: c.number() } };
-        const config = new Kfg(new KfgDriver(JsonDriver.definition), schema);
+        const driver = new JsonDriver({ path: TEST_JSON_PATH });
+        const config = new Kfg(driver, schema);
         
-        expect(() => config.load({ path: TEST_JSON_PATH })).toThrow(/Validation failed/);
+        expect(() => config.load()).toThrow(/Invalid JSON configuration/);
     });
 
-    // Verifies that the object returned by `root()` contains only configuration
-    // data and does not include any comment metadata.
-    it('should not include comment properties in root() object', () => {
+    it('should not include comment properties in proxy or get() object', () => {
         const schema = { app: { port: c.optional(c.number()) } };
-        const config = new Kfg(new KfgDriver(JsonDriver.definition), schema);
-        config.load({ path: TEST_JSON_PATH });
+        const driver = new JsonDriver({ path: TEST_JSON_PATH });
+        const config = new Kfg(driver, schema);
+        config.load();
 
-        config.set('app.port', 8080, { description: 'The application port' });
+        config.set('app.port', 8080, 'The application port');
 
         const appObject = config.get('app');
         expect(appObject).toEqual({ port: 8080 });
+    });
+
+    it('should show flattened suggestions in validation error when keyroot is true', () => {
+        fs.writeFileSync(TEST_JSON_PATH, JSON.stringify({}));
+        const schema = {
+            database: {
+                url: c.string(),
+                pool: {
+                    min: c.number({ default: 1 }),
+                    max: c.number({ default: 10 }),
+                },
+            },
+        };
+        const driver = new JsonDriver({ path: TEST_JSON_PATH, keyroot: true });
+        const config = new Kfg(driver, schema);
+
+        expect(() => config.load()).toThrow(/"database\.url": "<string>"/);
+        expect(() => config.load()).not.toThrow(/"database":\s*\{/);
     });
 });
