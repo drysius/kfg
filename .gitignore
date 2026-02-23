@@ -3,6 +3,7 @@ node_modules
 cjs
 esm
 Kfg.d.ts
+bun.lock
 config.json
 # output
 out
