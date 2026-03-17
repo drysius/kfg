@@ -72,7 +72,7 @@ export function updateEnvContent(
 
 	let lineIndex = -1;
 	for (let i = 0; i < lines.length; i++) {
-		if (new RegExp(`^s*${key}s*=s*`).test(lines[i])) {
+		if (new RegExp(`^\\s*${key}\\s*=\\s*`).test(lines[i])) {
 			keyFound = true;
 			lineIndex = i;
 			break;
@@ -80,20 +80,16 @@ export function updateEnvContent(
 	}
 
 	if (keyFound) {
-		// Key exists, update it.
-		newLines[lineIndex] = `${key}=${formattedValue}`;
+		// Key exists, update it, preserving the line's original indent if any
+		const indent = lines[lineIndex].match(/^\s*/)?.[0] || "";
+		newLines[lineIndex] = `${indent}${key}=${formattedValue}`;
 		// Check for description and add if it's not there.
 		if (description) {
 			const comment = `# ${description}`;
-			if (
-				lineIndex === 0 ||
-				!newLines[lineIndex - 1].trim().startsWith(comment)
-			) {
-				if (lineIndex > 0 && !newLines[lineIndex - 1].trim().startsWith("#")) {
-					newLines.splice(lineIndex, 0, comment);
-				} else if (lineIndex === 0) {
-                     newLines.splice(0, 0, comment);
-                }
+			const hasExactCommentAbove = lineIndex > 0 && newLines[lineIndex - 1].trim() === comment;
+			
+			if (!hasExactCommentAbove) {
+                newLines.splice(lineIndex, 0, comment);
 			}
 		}
 	} else {

@@ -3,12 +3,10 @@ import * as path from "node:path";
 import { KfgDriver } from "../kfg-driver";
 import type { SchemaDefinition } from "../types";
 import { flattenObject, unflattenObject, getProperty } from "../utils/object";
+import { colors } from "../utils/colors";
 
 export class JsonDriver extends KfgDriver<{ path?: string; keyroot?: boolean }, false> {
     private comments: Record<string, string> = {};
-    private readonly gray = (s: string) => `\x1b[90m${s}\x1b[0m`;
-    private readonly green = (s: string) => `\x1b[32m${s}\x1b[0m`;
-    private readonly red = (s: string) => `\x1b[31m${s}\x1b[0m`;
 
     constructor(config: { path?: string; keyroot?: boolean } = {}) {
         super({ name: "json-driver", config, async: false });
@@ -118,12 +116,12 @@ export class JsonDriver extends KfgDriver<{ path?: string; keyroot?: boolean }, 
                         ? jsonPath.replace(/^\//, "").replace(/\//g, ".")
                         : key;
                  invalid.push(
-                    `in ${fileLabel} fix:\n${this.gray("received:")}\n${this.colorizeJson(this.wrapJson({ [receivedKey]: err.value }), "received")}\n${this.gray("expected:")}\n${expected}\n(type: ${expectedType}, received: ${received})`,
+                    `in ${fileLabel} fix:\n${colors.gray("received:")}\n${this.colorizeJson(this.wrapJson({ [receivedKey]: err.value }), "received")}\n${colors.gray("expected:")}\n${expected}\n(type: ${expectedType}, received: ${received})`,
                 );
             }
         }
 
-        const sections: string[] = ["[KFG] Invalid JSON configuration."];
+        const sections: string[] = [colors.bold("[KFG] Invalid JSON configuration.")];
         if (missing.length > 0) {
             sections.push("Required entries not configured:");
             sections.push(...missing);
@@ -170,13 +168,13 @@ export class JsonDriver extends KfgDriver<{ path?: string; keyroot?: boolean }, 
     }
 
     private colorizeJson(jsonText: string, mode: "expected" | "received"): string {
-        const color = mode === "expected" ? this.green : this.red;
+        const color = mode === "expected" ? colors.green : colors.red;
         return jsonText
             .split("\n")
             .map((line) => {
                 const trimmed = line.trim();
                 if (trimmed === "{" || trimmed === "}" || trimmed === "}," || trimmed === "{,") {
-                    return this.gray(line);
+                    return colors.gray(line);
                 }
                 if (!trimmed) return line;
                 return color(line);

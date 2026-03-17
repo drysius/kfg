@@ -138,10 +138,18 @@ export class Kfg<
         descriptionOrOptions?: string | { description?: string }
     ): inPromise<D["async"], void> {
         if (!this["~loaded"]) throw new Error(notLoadedMessage(`writing "${String(path)}"`));
-        const description =
+        
+        let description =
             typeof descriptionOrOptions === "string"
                 ? descriptionOrOptions
                 : descriptionOrOptions?.description;
+        
+        if (!description) {
+            const schemaDef = getProperty(this["~schema"].defined, path as string);
+            if (schemaDef?.description) {
+                description = schemaDef.description;
+            }
+        }
         
         const original = JSON.parse(JSON.stringify(this["~cache"]));
         setProperty(this["~cache"], path as string, value);

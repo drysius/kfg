@@ -26,6 +26,9 @@ export function setProperty<T extends Record<string, any>>(
 	const lastKey = keys.pop() as string;
 	let target: any = obj;
 	for (const key of keys) {
+		if (key === "__proto__" || key === "constructor" || key === "prototype") {
+			continue;
+		}
 		if (target[key] === undefined || target[key] === null) {
 			target[key] = {};
 		} else if (typeof target[key] !== "object") {
@@ -33,7 +36,9 @@ export function setProperty<T extends Record<string, any>>(
 		}
 		target = target[key];
 	}
-	target[lastKey] = value;
+	if (lastKey !== "__proto__" && lastKey !== "constructor" && lastKey !== "prototype") {
+		target[lastKey] = value;
+	}
 }
 
 /**

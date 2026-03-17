@@ -3,17 +3,20 @@ import * as path from "node:path";
 import { KfgDriver } from "../kfg-driver";
 import type { SchemaDefinition, TSchema } from "../types";
 import { parse, removeEnvKey, updateEnvContent } from "../utils/env";
+import { colors } from "../utils/colors";
+import { flattenObject } from "../utils/object";
+
+export type EnvSource = "file" | "process" | "default" | "injected";
 
 export class EnvDriver extends KfgDriver<{
     path?: string;
     forceexit?: boolean;
     forceExit?: boolean;
+    debug?: boolean;
 }, false> {
-    private readonly gray = (s: string) => `\x1b[90m${s}\x1b[0m`;
-    private readonly green = (s: string) => `\x1b[32m${s}\x1b[0m`;
-    private readonly red = (s: string) => `\x1b[31m${s}\x1b[0m`;
+    private tracing: Record<string, { source: EnvSource; key: string }> = {};
 
-    constructor(config: { path?: string; forceexit?: boolean; forceExit?: boolean } = {}) {
+    constructor(config: { path?: string; forceexit?: boolean; forceExit?: boolean; debug?: boolean } = {}) {
         const forceExit = config.forceExit ?? config.forceexit ?? true;
         super({ name: "env-driver", config, async: false, forceExit });
     }
@@ -29,27 +32,45 @@ export class EnvDriver extends KfgDriver<{
             Object.entries(process.env).filter(([, v]) => v !== undefined),
         ) as Record<string, string>;
 
-        const allEnvValues = { ...envFileValues, ...processEnv };
+        // Reset tracing on each load
+        this.tracing = {};
 
-        const envData = this.traverseSchema(schema, allEnvValues);
+        const envData = this.traverseSchema(schema, envFileValues, processEnv);
         const defaultData = this.buildDefault(schema);
 
-        return this.merge(defaultData, envData);
+        const merged = this.merge(defaultData, envData);
+
+        if (this.config.debug) {
+            this.printTrace();
+        }
+
+        return merged;
     }
 
-    save(_data: Record<string, any>, options?: { path?: string, description?: string }): void {
+    save(data: Record<string, any>, options?: { path?: string, description?: string }): void {
+        const filePath = this.getFilePath();
+        const flatData = flattenObject(data);
+        
+        // If atomic update requested via options.path (called by Kfg.set when update not implemented)
         if (options?.path) {
-            // EnvDriver doesn't support full object save elegantly.
-            // It relies on atomic updates via `update` usually.
-            // But if called with path, we can try to update.
-            // However, we need the VALUE for that path.
-            // Since save() receives the full data, we'd need to extract it.
-            // Kfg now passes `update` if available, so this might be fallback.
+            const value = flatData[options.path];
+            this.update(options.path, value, options.description);
+            return;
         }
+
+        // Full save: read current, update all keys, write back
+        let currentContent = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : "";
+        
+        for (const [dotPath, value] of Object.entries(flatData)) {
+            const envKey = this.pathToEnvKey(dotPath);
+            currentContent = updateEnvContent(currentContent, envKey, value);
+        }
+        
+        fs.writeFileSync(filePath, currentContent);
     }
 
     update(key: string, value: any, description?: string): void {
-        const envKey = key.replace(/\./g, "_").toUpperCase();
+        const envKey = this.pathToEnvKey(key);
         const filePath = this.getFilePath();
         const currentContent = fs.existsSync(filePath)
             ? fs.readFileSync(filePath, "utf-8")
@@ -62,10 +83,11 @@ export class EnvDriver extends KfgDriver<{
             description,
         );
         fs.writeFileSync(filePath, newContent);
+        this.tracing[key] = { source: "injected", key: envKey };
     }
 
     delete(key: string): void {
-        const envKey = key.replace(/\./g, "_").toUpperCase();
+        const envKey = this.pathToEnvKey(key);
         const filePath = this.getFilePath();
         if (!fs.existsSync(filePath)) {
             return;
@@ -73,6 +95,7 @@ export class EnvDriver extends KfgDriver<{
         const currentContent = fs.readFileSync(filePath, "utf-8");
         const newContent = removeEnvKey(currentContent, envKey);
         fs.writeFileSync(filePath, newContent);
+        delete this.tracing[key];
     }
 
     formatError(errors: any[]): string {
@@ -103,16 +126,16 @@ export class EnvDriver extends KfgDriver<{
                 : `<${expectedType}>`;
 
             if (isMissing) {
-                missing.push(this.green(`+ ${envKey}=${expected}`));
+                missing.push(colors.green(`+ ${envKey}=${expected}`));
             } else {
                 const received = typeof err.value === "string" ? `"${err.value}"` : String(err.value);
                 invalid.push(
-                    `in ${fileLabel} fix:\n${this.gray("received:")}\n${this.red(`- ${envKey}=${received}`)}\n${this.gray("expected:")}\n${this.green(`+ ${envKey}=${expected}`)}`,
+                    `in ${fileLabel} fix:\n${colors.gray("received:")}\n${colors.red(`- ${envKey}=${received}`)}\n${colors.gray("expected:")}\n${colors.green(`+ ${envKey}=${expected}`)}`,
                 );
             }
         }
 
-        const sections: string[] = ["[KFG] Invalid environment configuration."];
+        const sections: string[] = [colors.bold("[KFG] Invalid environment configuration.")];
         if (missing.length > 0) {
             sections.push(`in ${fileLabel} add:`);
             sections.push(...missing);
@@ -129,9 +152,14 @@ export class EnvDriver extends KfgDriver<{
         return path.resolve(process.cwd(), this.config.path || ".env");
     }
 
+    private pathToEnvKey(path: string): string {
+        return path.replace(/\./g, "_").toUpperCase();
+    }
+
     private traverseSchema(
         schema: SchemaDefinition,
-        envValues: Record<string, string>,
+        envFileValues: Record<string, string>,
+        processEnv: Record<string, string>,
         prefix: string[] = [],
     ) {
         const builtConfig: Record<string, any> = {};
@@ -146,20 +174,30 @@ export class EnvDriver extends KfgDriver<{
             if (isTypeBoxSchema(definition)) {
                 const prop = definition.prop as string | undefined;
                 const envKey = prop || currentPath.join("_").toUpperCase();
+                const dotPath = currentPath.join(".");
     
-                let value: any = envValues[envKey];
-    
+                let value: any = processEnv[envKey];
+                let source: EnvSource = "process";
+
+                if (value === undefined) {
+                    value = envFileValues[envKey];
+                    source = "file";
+                }
+
                 if (value === undefined) {
                     value = definition.default;
+                    source = "default";
                 }
     
                 if (value !== undefined) {
+                    this.tracing[dotPath] = { source, key: envKey };
                     builtConfig[key] = this.coerceType(value, definition);
                 }
             } else if (typeof definition === "object" && definition !== null) {
                 const nestedConfig = this.traverseSchema(
                     definition as SchemaDefinition,
-                    envValues,
+                    envFileValues,
+                    processEnv,
                     currentPath,
                 );
                 builtConfig[key] = nestedConfig;
@@ -188,5 +226,21 @@ export class EnvDriver extends KfgDriver<{
         }
     
         return value;
+    }
+
+    private printTrace() {
+        console.log(colors.bold("\n[KFG] Environment Trace:"));
+        for (const [path, info] of Object.entries(this.tracing)) {
+            const sourceColor = 
+                info.source === "process" ? colors.cyan :
+                info.source === "file" ? colors.green :
+                info.source === "injected" ? colors.yellow :
+                colors.gray;
+            
+            console.log(
+                `${colors.gray(path.padEnd(25))} -> ${colors.bold(info.key.padEnd(20))} [${sourceColor(info.source)}]`
+            );
+        }
+        console.log("");
     }
 }
