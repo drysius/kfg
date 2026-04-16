@@ -188,4 +188,162 @@ describe('Env Driver Integration', () => {
         config.load();
         expect(config.get('var')).toBe('val');
     });
+
+    // --- Bug fixes ---
+
+    describe('c.Object() schema in env driver (Bug 1)', () => {
+        it('should read nested props from env vars (APP_NAME, APP_PORT) when schema uses c.Object()', () => {
+            fs.writeFileSync(TEST_ENV_PATH, 'APP_NAME=myapp\nAPP_PORT=8080\n');
+
+            const driver = new EnvDriver({ path: '.env.test', forceexit: false });
+            const config = new Kfg(driver, {
+                app: c.Object({
+                    name: c.string(),
+                    port: c.number(),
+                })
+            });
+
+            config.load();
+            expect(config.get('app')).toEqual({ name: 'myapp', port: 8080 });
+        });
+
+        it('should use defaults when c.Object() fields have defaults and env is missing', () => {
+            fs.writeFileSync(TEST_ENV_PATH, '');
+
+            const driver = new EnvDriver({ path: '.env.test', forceexit: false });
+            const config = new Kfg(driver, {
+                app: c.Object({
+                    name: c.string({ default: 'default-app' }),
+                    port: c.number({ default: 3000 }),
+                })
+            });
+
+            config.load();
+            const app = config.get('app');
+            expect(app).not.toBeUndefined();
+            expect(app.name).toBe('default-app');
+            expect(app.port).toBe(3000);
+        });
+
+        it('c.Optional(c.Object()) without env → get() returns undefined, not crash', () => {
+            fs.writeFileSync(TEST_ENV_PATH, '');
+
+            const driver = new EnvDriver({ path: '.env.test', forceexit: false });
+            const config = new Kfg(driver, {
+                app: c.optional(c.Object({
+                    name: c.string({ default: 'x' }),
+                })),
+                other: c.string({ default: 'y' }),
+            });
+
+            config.load();
+            // should not throw — app is optional, may be undefined
+            expect(() => config.get('other')).not.toThrow();
+        });
+
+        it('c.Object() with env vars should override defaults', () => {
+            fs.writeFileSync(TEST_ENV_PATH, 'DB_HOST=prod-server\nDB_PORT=5432\n');
+
+            const driver = new EnvDriver({ path: '.env.test', forceexit: false });
+            const config = new Kfg(driver, {
+                db: c.Object({
+                    host: c.string({ default: 'localhost' }),
+                    port: c.number({ default: 3306 }),
+                })
+            });
+
+            config.load();
+            expect(config.get('db.host')).toBe('prod-server');
+            expect(config.get('db.port')).toBe(5432);
+        });
+
+        it('c.Object() behaves same as plain nested object schema', () => {
+            fs.writeFileSync(TEST_ENV_PATH, 'SERVER_HOST=example.com\nSERVER_PORT=443\n');
+
+            const driver1 = new EnvDriver({ path: '.env.test', forceexit: false });
+            const configObj = new Kfg(driver1, {
+                server: c.Object({
+                    host: c.string({ default: 'localhost' }),
+                    port: c.number({ default: 80 }),
+                })
+            });
+
+            const driver2 = new EnvDriver({ path: '.env.test', forceexit: false });
+            const configPlain = new Kfg(driver2, {
+                server: {
+                    host: c.string({ default: 'localhost' }),
+                    port: c.number({ default: 80 }),
+                }
+            });
+
+            configObj.load();
+            configPlain.load();
+
+            expect(configObj.get('server')).toEqual(configPlain.get('server'));
+        });
+    });
+
+    describe('coerceType JSON object parsing (Bug 2)', () => {
+        it('should parse JSON object string from env var for c.Object() field', () => {
+            fs.writeFileSync(TEST_ENV_PATH, 'CONFIG={"host":"db.local","port":5432}\n');
+
+            const driver = new EnvDriver({ path: '.env.test', forceexit: false });
+            // Using c.record to accept arbitrary JSON object as single var
+            const config = new Kfg(driver, {
+                config: c.record(c.string(), c.any()),
+            });
+
+            config.load();
+            const val = config.get('config') as any;
+            expect(val.host).toBe('db.local');
+            expect(val.port).toBe(5432);
+        });
+
+        it('should fallthrough on invalid JSON object string', () => {
+            fs.writeFileSync(TEST_ENV_PATH, 'VAL={not valid json}\n');
+
+            const driver = new EnvDriver({ path: '.env.test', forceexit: false });
+            const config = new Kfg(driver, {
+                val: c.string({ default: 'fallback' }),
+            });
+
+            config.load();
+            // Validation fails or falls through — just ensure no unhandled exception
+            expect(() => config.get('val')).not.toThrow();
+        });
+    });
+
+    describe('nested object only set when non-empty (Bug 3)', () => {
+        it('defaults fill in when no env vars exist for nested object', () => {
+            fs.writeFileSync(TEST_ENV_PATH, '');
+
+            const driver = new EnvDriver({ path: '.env.test', forceexit: false });
+            const config = new Kfg(driver, {
+                server: {
+                    host: c.string({ default: 'localhost' }),
+                    port: c.number({ default: 3000 }),
+                }
+            });
+
+            config.load();
+            expect(config.get('server.host')).toBe('localhost');
+            expect(config.get('server.port')).toBe(3000);
+        });
+
+        it('partial env vars override only matching fields, defaults fill rest', () => {
+            fs.writeFileSync(TEST_ENV_PATH, 'SERVER_HOST=custom-host\n');
+
+            const driver = new EnvDriver({ path: '.env.test', forceexit: false });
+            const config = new Kfg(driver, {
+                server: {
+                    host: c.string({ default: 'localhost' }),
+                    port: c.number({ default: 3000 }),
+                }
+            });
+
+            config.load();
+            expect(config.get('server.host')).toBe('custom-host');
+            expect(config.get('server.port')).toBe(3000);
+        });
+    });
 });

@@ -172,26 +172,40 @@ export class EnvDriver extends KfgDriver<{
                 !!def[Symbol.for("TypeBox.Kind")];
     
             if (isTypeBoxSchema(definition)) {
-                const prop = definition.prop as string | undefined;
-                const envKey = prop || currentPath.join("_").toUpperCase();
-                const dotPath = currentPath.join(".");
-    
-                let value: any = processEnv[envKey];
-                let source: EnvSource = "process";
+                // TypeBox Object with properties → recurse like a plain nested object
+                // so APP_NAME=... and APP_PORT=... are read instead of a single APP=...
+                if ((definition as any).type === "object" && (definition as any).properties) {
+                    const nestedConfig = this.traverseSchema(
+                        (definition as any).properties as SchemaDefinition,
+                        envFileValues,
+                        processEnv,
+                        currentPath,
+                    );
+                    if (Object.keys(nestedConfig).length > 0) {
+                        builtConfig[key] = nestedConfig;
+                    }
+                } else {
+                    const prop = definition.prop as string | undefined;
+                    const envKey = prop || currentPath.join("_").toUpperCase();
+                    const dotPath = currentPath.join(".");
 
-                if (value === undefined) {
-                    value = envFileValues[envKey];
-                    source = "file";
-                }
+                    let value: any = processEnv[envKey];
+                    let source: EnvSource = "process";
 
-                if (value === undefined) {
-                    value = definition.default;
-                    source = "default";
-                }
-    
-                if (value !== undefined) {
-                    this.tracing[dotPath] = { source, key: envKey };
-                    builtConfig[key] = this.coerceType(value, definition);
+                    if (value === undefined) {
+                        value = envFileValues[envKey];
+                        source = "file";
+                    }
+
+                    if (value === undefined) {
+                        value = definition.default;
+                        source = "default";
+                    }
+
+                    if (value !== undefined) {
+                        this.tracing[dotPath] = { source, key: envKey };
+                        builtConfig[key] = this.coerceType(value, definition);
+                    }
                 }
             } else if (typeof definition === "object" && definition !== null) {
                 const nestedConfig = this.traverseSchema(
@@ -200,7 +214,9 @@ export class EnvDriver extends KfgDriver<{
                     processEnv,
                     currentPath,
                 );
-                builtConfig[key] = nestedConfig;
+                if (Object.keys(nestedConfig).length > 0) {
+                    builtConfig[key] = nestedConfig;
+                }
             }
         }
     
@@ -224,7 +240,18 @@ export class EnvDriver extends KfgDriver<{
                 }
             }
         }
-    
+
+        if (type === "object" && typeof value === "string") {
+            const trimmedValue = value.trim();
+            if (trimmedValue.startsWith("{") && trimmedValue.endsWith("}")) {
+                try {
+                    return JSON.parse(trimmedValue);
+                } catch {
+                    /* fallthrough */
+                }
+            }
+        }
+
         return value;
     }
 
