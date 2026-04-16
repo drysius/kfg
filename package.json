@@ -2,7 +2,7 @@
   "name": "kfg",
   "type": "module",
   "description": "Powerful, type-safe configuration system for Node.js, Bun, and Deno. Built on TypeBox with Laravel-style rules and smart environment tracing.",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
